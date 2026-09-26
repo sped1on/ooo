@@ -1,0 +1,28 @@
+{
+  "name": "koridor",
+  "version": "1.0.0",
+  "description": "Коридор — 2.5D настольная игра (Quoridor) с ботом, онлайном, магазином скинов",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test test/*.test.js",
+    "vendor": "esbuild node_modules/three/build/three.module.js --bundle --minify --format=esm --outfile=public/vendor/three.module.min.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sped1on/ooo.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/sped1on/ooo/issues"
+  },
+  "homepage": "https://github.com/sped1on/ooo#readme",
+  "dependencies": {
+    "three": "^0.186.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "type": "module"
+}
