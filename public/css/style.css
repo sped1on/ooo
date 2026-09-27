@@ -1873,3 +1873,83 @@ input[type='range'] {
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+/* ---------- Переключатель игр ---------- */
+
+.game-switch {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  margin: -12px 0 18px;
+  border-radius: 12px;
+  background: rgba(8, 12, 24, 0.7);
+  border: 1px solid var(--line);
+}
+
+.game-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 2px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: #b6c4e4;
+}
+
+.game-btn .ic {
+  width: 20px;
+  height: 20px;
+}
+
+.game-btn.active {
+  background: linear-gradient(180deg, #3d8bff, #1c5fe4);
+  color: #fff;
+  box-shadow: 0 4px 14px var(--blue-glow);
+}
+
+.player-card.side0.active {
+  border-color: rgba(255, 226, 168, 0.8);
+  box-shadow: 0 0 26px rgba(255, 210, 140, 0.35);
+}
+
+.player-card.side1.active {
+  border-color: rgba(170, 180, 200, 0.8);
+  box-shadow: 0 0 26px rgba(150, 170, 210, 0.35);
+}
+
+.side0 .avatar {
+  background: radial-gradient(circle at 35% 30%, #fff3d6, #c9a877);
+}
+
+.side0 .avatar .ic {
+  color: #3a2416;
+}
+
+.side1 .avatar {
+  background: radial-gradient(circle at 35% 30%, #5a4a40, #1a0e06);
+}
+
+.turn-banner.side0 {
+  border-color: rgba(255, 226, 168, 0.7);
+  color: #ffe2a8;
+}
+
+.turn-banner.side1 {
+  border-color: rgba(170, 180, 200, 0.7);
+  color: #c9d4ec;
+}
+
+@media (max-width: 900px), (max-height: 560px) and (max-width: 1100px) {
+  .game-switch {
+    margin: 0;
+    order: -1;
+    width: 100%;
+  }
+  .game-btn {
+    flex-direction: row;
+    justify-content: center;
+    font-size: 13px;
+  }
+}

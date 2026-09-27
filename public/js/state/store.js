@@ -7,7 +7,7 @@ const DAY = 24 * 60 * 60 * 1000;
 
 const DEFAULTS = {
   coins: 520,
-  owned: { walls: [], field: [], pawns: [], finish: [], background: [] },
+  owned: { walls: [], field: [], pawns: [], finish: [], background: [], board8: [], chessPieces: [], checkersPieces: [] },
   equipped: { ...DEFAULT_SKINS },
   lastBonus: 0,
   updated: 0,

@@ -141,3 +141,54 @@ export function finishMaterial(id, player) {
     return mat;
   });
 }
+
+// ---------- Шахматы и шашки ----------
+
+// Материал по описанию { style, c, r, p, rough, metal, glow, opacity, emissive, faceted }
+export function specMaterial(spec, key) {
+  return cached(`spec:${key}`, () => {
+    switch (spec.style) {
+      case 'metal':
+        return new THREE.MeshPhysicalMaterial({ color: spec.c, metalness: 1, roughness: spec.rough ?? 0.25, clearcoat: 0.6, clearcoatRoughness: 0.1 });
+      case 'glass':
+        return new THREE.MeshPhysicalMaterial({
+          color: spec.c,
+          roughness: 0.04,
+          transparent: true,
+          opacity: spec.opacity ?? 0.7,
+          clearcoat: 1,
+          clearcoatRoughness: 0.03,
+          emissive: spec.c,
+          emissiveIntensity: spec.emissive ?? 0.3,
+          flatShading: !!spec.faceted,
+        });
+      case 'neon':
+        return new THREE.MeshStandardMaterial({ color: '#0a0a14', emissive: spec.c, emissiveIntensity: 2.2, roughness: 0.35, toneMapped: false });
+      case 'tex':
+        return texturedMaterial(spec.r, spec.p, TEX_SIZE, { rough: spec.rough, metal: spec.metal, glow: spec.glow ?? 1, clearcoat: true });
+      default:
+        return new THREE.MeshPhysicalMaterial({ color: spec.c, roughness: spec.rough ?? 0.35, clearcoat: 0.7, clearcoatRoughness: 0.15 });
+    }
+  });
+}
+
+export function pieceMaterial(kind, id, color) {
+  const skin = findSkin(kind, id);
+  return specMaterial(color === 0 ? skin.w : skin.b, `${kind}:${skin.id}:${color}`);
+}
+
+export function pieceFaceted(kind, id, color) {
+  const skin = findSkin(kind, id);
+  return !!(color === 0 ? skin.w : skin.b).faceted;
+}
+
+export function board8Materials(id, size = SURF_SIZE) {
+  const skin = findSkin('board8', id);
+  return cached(`board8:${skin.id}:${size}`, () => ({
+    light: texturedMaterial(skin.light.r, skin.light.p, size, { rough: skin.rough, metal: skin.metal, glow: skin.glow ?? 1 }),
+    dark: texturedMaterial(skin.dark.r, skin.dark.p, size, { rough: skin.rough, metal: skin.metal, glow: skin.glow ?? 1 }),
+    frame: texturedMaterial(skin.frame.r, skin.frame.p, Math.min(TEX_SIZE, size), { rough: 0.55, metal: skin.frame.r === 'metal' ? 0.5 : 0.05, glow: 1 }),
+    base: new THREE.MeshStandardMaterial({ color: new THREE.Color(skin.frame.p.c || '#222').multiplyScalar(0.5), roughness: 0.8 }),
+    skin,
+  }));
+}

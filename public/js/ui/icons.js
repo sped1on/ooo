@@ -32,5 +32,10 @@ export const icons = {
   video: s('<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/>'),
   check: s('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
   trophy: s('<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H4.5c0 3 1.5 4.5 3.7 4.8M16 6h3.5c0 3-1.5 4.5-3.7 4.8M12 13v4M8 20h8M9.5 17h5v3h-5z"/>'),
+  checker: s('<ellipse cx="12" cy="15" rx="8" ry="3.5"/><path d="M4 15v-3c0-1.9 3.6-3.5 8-3.5s8 1.6 8 3.5v3"/><ellipse cx="12" cy="12" rx="8" ry="3.5"/>'),
+  target: s('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'),
+  wheel: s('<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/><circle cx="12" cy="12" r="2" fill="currentColor"/>'),
+  lock: s('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+  star: s('<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>', true),
   eye: s('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
 };

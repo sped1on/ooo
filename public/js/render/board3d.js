@@ -920,7 +920,7 @@ export class BoardView {
     const shift = (pad.top - pad.bottom) / 2;
     if (shift) this.camera.setViewOffset(size.x, size.y, 0, -shift, size.x, size.y);
     else this.camera.clearViewOffset();
-    const R = n / 2 + FRAME_W + 0.45;
+    const R = n / 2 + (this.frameW ?? FRAME_W) + 0.45;
     const th = THREE.MathUtils.degToRad(this.tilt);
     const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * (availH / size.y);
     const aspect = size.x / availH;

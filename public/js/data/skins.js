@@ -211,15 +211,80 @@ export const SETS = [
   { id: 'portal', name: 'Портал', skins: { field: 'portal', walls: 'techno', pawns: 'crystal', finish: 'techno', background: 'fantasy' } },
 ];
 
+// ---------- Шахматы и шашки ----------
+// Доска 8×8: light/dark — текстуры светлых и тёмных полей на всю доску
+
+const board8Color = (id, name, light, dark, frame) => ({ id, name, plain: true, light: { r: 'plain', p: { c: light } }, dark: { r: 'plain', p: { c: dark } }, frame: { r: 'plain', p: { c: frame } }, rough: 0.45 });
+
+const BOARD8_COLORS = [
+  { id: 'c-wood', name: 'Дерево', plain: true, light: { r: 'wood', p: { c: '#e2c28f', c2: '#b8894f', planks: 8, bevel: false } }, dark: { r: 'wood', p: { c: '#8a5328', c2: '#4e2a10', planks: 8, bevel: false } }, frame: { r: 'wood', p: { c: '#5c3317', c2: '#2a1606', planks: 2, bevel: false } }, rough: 0.5, label: '#f0d7a8' },
+  board8Color('c-tournament', 'Турнирная', '#eeeed2', '#769656', '#3d4a2e'),
+  board8Color('c-blue', 'Голубая', '#dee3e6', '#8ca2ad', '#3e4a52'),
+  board8Color('c-brown', 'Коричневая', '#f0d9b5', '#b58863', '#5a3a22'),
+  board8Color('c-grey', 'Серая', '#cfd3da', '#6b7280', '#2b2f38'),
+  board8Color('c-night', 'Ночная', '#4a5568', '#1f2533', '#10141d'),
+];
+
+const BOARD8_SKINS = [
+  { id: 'marble', name: 'Мрамор', price: 250, light: { r: 'marble', p: { c: '#eef0f3', c2: '#8a909b' } }, dark: { r: 'marble', p: { c: '#3a3d45', c2: '#b9bec8' } }, frame: { r: 'marble', p: { c: '#26282e', c2: '#9aa0aa' } }, rough: 0.25 },
+  { id: 'stone', name: 'Камень', price: 150, light: { r: 'stone', p: { c: '#b9bdc4', slabs: 1 } }, dark: { r: 'stone', p: { c: '#5d626b', slabs: 1 } }, frame: { r: 'cobble', p: { c: '#6a6c70' } }, rough: 0.85 },
+  { id: 'glass', name: 'Стекло', price: 300, light: { r: 'glass', p: { c: '#bfe3ff' } }, dark: { r: 'glass', p: { c: '#2a4a7a' } }, frame: { r: 'metal', p: { c: '#3a4150', plates: 1, rivets: false } }, rough: 0.05 },
+  { id: 'neon', name: 'Неон', price: 350, light: { r: 'neongrid', p: { c: '#1b1236', glow: '#b04dff', lines: 8 } }, dark: { r: 'neongrid', p: { c: '#07060f', glow: '#22e4ff', lines: 8 } }, frame: { r: 'techno', p: { c: '#081226', glow: '#ff3ccf' } }, rough: 0.35, glow: 1.2 },
+  { id: 'metal', name: 'Металл', price: 200, light: { r: 'brushed', p: { c: '#c9d0da' } }, dark: { r: 'brushed', p: { c: '#555d6a' } }, frame: { r: 'metal', p: { c: '#3a414c', plates: 1 } }, rough: 0.3, metal: 0.6 },
+  { id: 'ice', name: 'Лёд', price: 250, light: { r: 'ice', p: { c: '#cfeaff', bevel: false } }, dark: { r: 'ice', p: { c: '#3d8fd0', bevel: false } }, frame: { r: 'ice', p: { c: '#6aa8d8', bevel: false } }, rough: 0.12, glow: 0.3 },
+  { id: 'lava', name: 'Лава', price: 300, light: { r: 'stone', p: { c: '#6b5f5a', slabs: 1 } }, dark: { r: 'lava', p: { c: '#241a18', glow: '#ff5a14' } }, frame: { r: 'stone', p: { c: '#2d2a2c', slabs: 1 } }, rough: 0.8, glow: 1.6 },
+  { id: 'space', name: 'Космос', price: 350, light: { r: 'space', p: { c: '#2a2f6a', c2: '#8a6bff', c3: '#4db8ff' } }, dark: { r: 'space', p: { c: '#05061a', c2: '#6b2ad8', c3: '#1c4ad8' } }, frame: { r: 'metal', p: { c: '#262b3a', plates: 1, rivets: false } }, rough: 0.35, glow: 0.8 },
+  { id: 'sand', name: 'Песок', price: 150, light: { r: 'sand', p: { c: '#ecd3a4' } }, dark: { r: 'sandstone', p: { c: '#b47a44' } }, frame: { r: 'sandstone', p: { c: '#8a5a2c' } }, rough: 0.9 },
+  { id: 'grass', name: 'Газон', price: 150, light: { r: 'grass', p: { c: '#7cc05a' } }, dark: { r: 'grass', p: { c: '#3a7a2c' } }, frame: { r: 'soil', p: { c: '#5b3f25' } }, rough: 0.9 },
+  { id: 'gold', name: 'Золото', price: 400, light: { r: 'gold', p: { c: '#f3d27a' } }, dark: { r: 'marble', p: { c: '#1d1b1a', c2: '#b8913a' } }, frame: { r: 'gold', p: { c: '#b8862c' } }, rough: 0.25, metal: 0.5 },
+  { id: 'dragon', name: 'Дракон', price: 400, light: { r: 'stone', p: { c: '#8a7f7a', slabs: 1 } }, dark: { r: 'scales', p: { c: '#6a1a1c', glow: '#ff2a1a', grid: 16 } }, frame: { r: 'stone', p: { c: '#231c1e', slabs: 1 } }, rough: 0.5, glow: 0.6 },
+  { id: 'cyber', name: 'Киберпанк', price: 350, light: { r: 'techgrid', p: { c: '#12324a', glow: '#1ec8e8' } }, dark: { r: 'techgrid', p: { c: '#050d16', glow: '#ff3ccf' } }, frame: { r: 'techno', p: { c: '#081420', glow: '#2f7dff' } }, rough: 0.4, glow: 1 },
+  { id: 'wood-dark', name: 'Эбен', price: 200, light: { r: 'wood', p: { c: '#c79a64', c2: '#8a5f30', planks: 8, bevel: false } }, dark: { r: 'wood', p: { c: '#3a2416', c2: '#1a0e06', planks: 8, bevel: false } }, frame: { r: 'wood', p: { c: '#2a1a0e', c2: '#0e0804', planks: 2, bevel: false } }, rough: 0.45 },
+];
+
+// Фигуры: w/b — материал белых и чёрных (как у фишек: color | metal | tex | glass | neon)
+const pieceColor = (id, name, w, b) => ({ id, name, plain: true, w: { style: 'color', c: w, rough: 0.35 }, b: { style: 'color', c: b, rough: 0.35 } });
+
+const PIECE_COLORS = [
+  { id: 'c-classic', name: 'Классика', plain: true, w: { style: 'tex', r: 'wood', p: { c: '#f1dcb4', c2: '#c9a877', planks: 1, bevel: false }, rough: 0.35 }, b: { style: 'tex', r: 'wood', p: { c: '#3a2416', c2: '#1a0e06', planks: 1, bevel: false }, rough: 0.35 } },
+  pieceColor('c-bw', 'Белые и чёрные', '#f2f2ee', '#24252a'),
+  pieceColor('c-redblue', 'Красные и синие', '#e8202f', '#1f6bff'),
+  pieceColor('c-cream', 'Слоновая кость', '#f3e6c8', '#6b3a1e'),
+  pieceColor('c-grey', 'Серые', '#d9dde4', '#4a4f5a'),
+];
+
+const PIECE_SKINS = [
+  { id: 'marble', name: 'Мрамор', price: 250, w: { style: 'tex', r: 'marble', p: { c: '#f0f1f4', c2: '#8a909b' }, rough: 0.2 }, b: { style: 'tex', r: 'marble', p: { c: '#2a2c32', c2: '#b9bec8' }, rough: 0.2 } },
+  { id: 'metal', name: 'Золото и серебро', price: 350, w: { style: 'metal', c: '#f1c24e', rough: 0.2 }, b: { style: 'metal', c: '#aeb8c6', rough: 0.25 } },
+  { id: 'glass', name: 'Стекло', price: 300, w: { style: 'glass', c: '#e6f6ff', emissive: 0.2, opacity: 0.6 }, b: { style: 'glass', c: '#4a5a7a', emissive: 0.15, opacity: 0.75 } },
+  { id: 'neon', name: 'Неон', price: 300, w: { style: 'neon', c: '#22e4ff' }, b: { style: 'neon', c: '#ff3ccf' } },
+  { id: 'crystal', name: 'Кристалл', price: 400, w: { style: 'glass', c: '#9fd6ff', emissive: 0.5, opacity: 0.85, faceted: true }, b: { style: 'glass', c: '#b04dff', emissive: 0.5, opacity: 0.85, faceted: true } },
+  { id: 'stone', name: 'Камень', price: 150, w: { style: 'tex', r: 'granite', p: { c: '#b9bdc4' }, rough: 0.85 }, b: { style: 'tex', r: 'granite', p: { c: '#3d4048' }, rough: 0.85 } },
+  { id: 'lava', name: 'Огонь и лёд', price: 350, w: { style: 'glass', c: '#8fdcff', emissive: 0.5, opacity: 0.85 }, b: { style: 'tex', r: 'lava', p: { c: '#1a1010', glow: '#ff5a14' }, glow: 1.6, rough: 0.8 } },
+  { id: 'ruby', name: 'Рубин и изумруд', price: 400, w: { style: 'glass', c: '#1fe07a', emissive: 0.5, opacity: 0.88, faceted: true }, b: { style: 'glass', c: '#ff1f45', emissive: 0.5, opacity: 0.88, faceted: true } },
+  { id: 'cosmos', name: 'Космос', price: 350, w: { style: 'tex', r: 'space', p: { c: '#2a2f6a', c2: '#8a6bff', c3: '#4db8ff' }, glow: 0.6, rough: 0.3 }, b: { style: 'tex', r: 'space', p: { c: '#05061a', c2: '#b02ad8', c3: '#2a6ad8' }, glow: 0.9, rough: 0.3 } },
+  { id: 'wood-red', name: 'Красное дерево', price: 200, w: { style: 'tex', r: 'wood', p: { c: '#e8c9a0', c2: '#b58a5a', planks: 1, bevel: false }, rough: 0.35 }, b: { style: 'tex', r: 'wood', p: { c: '#7a2a18', c2: '#3a0e06', planks: 1, bevel: false }, rough: 0.35 } },
+];
+
 export const SKIN_KINDS = {
   field: { title: 'Поле', colors: FIELD_COLORS, list: FIELD_SKINS },
   walls: { title: 'Стены', colors: WALL_COLORS, list: WALL_SKINS },
   pawns: { title: 'Фишки', colors: PAWN_COLORS, list: PAWN_SKINS },
   finish: { title: 'Финиш', colors: FINISH_COLORS, list: FINISH_SKINS },
   background: { title: 'Фон', colors: BG_COLORS, list: BG_SKINS },
+  board8: { title: 'Доска', colors: BOARD8_COLORS, list: BOARD8_SKINS },
+  chessPieces: { title: 'Фигуры', colors: PIECE_COLORS, list: PIECE_SKINS },
+  checkersPieces: { title: 'Шашки', colors: PIECE_COLORS, list: PIECE_SKINS },
 };
 
-export const DEFAULT_SKINS = { field: 'c-graphite', walls: 'c-grey', pawns: 'c-player', finish: 'c-player', background: 'c-night' };
+// Какие вкладки магазина показывать для каждой игры
+export const GAME_SKIN_KINDS = {
+  koridor: ['field', 'walls', 'pawns', 'finish', 'background'],
+  chess: ['board8', 'chessPieces', 'background'],
+  checkers: ['board8', 'checkersPieces', 'background'],
+};
+
+export const DEFAULT_SKINS = { field: 'c-graphite', walls: 'c-grey', pawns: 'c-player', finish: 'c-player', background: 'c-night', board8: 'c-wood', chessPieces: 'c-classic', checkersPieces: 'c-classic' };
 
 export function findSkin(kind, id) {
   const k = SKIN_KINDS[kind];

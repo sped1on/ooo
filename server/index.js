@@ -8,6 +8,62 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Game, BOARD_SIZES, sanitizeMove } from '../public/js/core/quoridor.js';
+import { Chess } from '../public/js/core/chess.js';
+import { Checkers } from '../public/js/core/checkers.js';
+
+const KINDS = ['koridor', 'chess', 'checkers'];
+
+// Единый интерфейс для трёх игр: turn, done, result, moves, play(move)
+function makeEngine(kind, size) {
+  if (kind === 'koridor') {
+    const g = new Game(size);
+    return {
+      moves: [],
+      done: false,
+      result: null,
+      get turn() {
+        return g.turn;
+      },
+      sanitize: sanitizeMove,
+      play(m) {
+        if (!g.play(m)) return false;
+        this.moves.push(m);
+        if (g.winner !== -1) {
+          this.done = true;
+          this.result = { winner: g.winner, reason: 'goal' };
+        }
+        return true;
+      },
+    };
+  }
+  const g = kind === 'chess' ? new Chess() : new Checkers();
+  const sq = (v) => (Number.isInteger(v) && v >= 0 && v < 64 ? v : null);
+  return {
+    moves: [],
+    done: false,
+    result: null,
+    get turn() {
+      return g.turn;
+    },
+    sanitize(raw) {
+      if (!raw || sq(raw.from) === null || sq(raw.to) === null) return null;
+      const m = { from: raw.from, to: raw.to };
+      if (kind === 'chess' && ['q', 'r', 'b', 'n'].includes(raw.promo)) m.promo = raw.promo;
+      if (kind === 'checkers' && Array.isArray(raw.path) && raw.path.length <= 16 && raw.path.every((v) => sq(v) !== null)) m.path = raw.path;
+      return m;
+    },
+    play(m) {
+      if (!g.play(m)) return false;
+      this.moves.push(m);
+      const r = g.result();
+      if (r) {
+        this.done = true;
+        this.result = r;
+      }
+      return true;
+    },
+  };
+}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const VENDOR = path.resolve(ROOT, '..', 'node_modules', 'three', 'build');
@@ -72,8 +128,9 @@ function send(client, msg) {
 }
 
 class Room {
-  constructor(size, time, isPrivate) {
+  constructor(kind, size, time, isPrivate) {
     this.code = makeCode();
+    this.kind = kind;
     this.size = size;
     this.time = time;
     this.isPrivate = isPrivate;
@@ -105,7 +162,7 @@ class Room {
     this.players.forEach((c, i) => {
       c.seat = i;
     });
-    this.game = new Game(this.size);
+    this.game = makeEngine(this.kind, this.size);
     this.rematch = [false, false];
     this.clocks = [this.time * 1000, this.time * 1000];
     this.turnStart = Date.now();
@@ -121,7 +178,8 @@ class Room {
       time: this.time,
       names: this.players.map((c) => c?.name || 'Игрок'),
       skins: this.players.map((c) => c?.skin || null),
-      moves: this.game.history.map(({ type, x, y, o }) => (type === 'wall' ? { type, x, y, o } : { type, x, y })),
+      kind: this.kind,
+      moves: this.game.moves,
       turn: this.game.turn,
       clocks: this.currentClocks(),
     };
@@ -130,19 +188,19 @@ class Room {
   // Шахматные часы: время тикает только у того, чей ход
   currentClocks() {
     const c = this.clocks.slice();
-    if (this.game && this.game.winner === -1) c[this.game.turn] = Math.max(0, c[this.game.turn] - (Date.now() - this.turnStart));
+    if (this.game && !this.game.done) c[this.game.turn] = Math.max(0, c[this.game.turn] - (Date.now() - this.turnStart));
     return c;
   }
 
   armClock() {
     clearTimeout(this.timer);
-    if (!this.game || this.game.winner !== -1) return;
+    if (!this.game || this.game.done) return;
     const left = this.clocks[this.game.turn];
     this.timer = setTimeout(() => this.onTimeout(), left + 250);
   }
 
   onTimeout() {
-    if (!this.game || this.game.winner !== -1) return;
+    if (!this.game || this.game.done) return;
     const loser = this.game.turn;
     this.clocks[loser] = 0;
     this.finish(1 - loser, 'timeout');
@@ -161,13 +219,16 @@ class Room {
     this.armClock();
     const clocks = this.currentClocks();
     this.players.forEach((c) => send(c, { t: 'action', move, by, clocks }));
-    if (this.game.winner !== -1) this.finish(this.game.winner, 'goal');
+    if (this.game.done) this.finish(this.game.result.winner, this.game.result.reason);
     return true;
   }
 
   finish(winner, reason) {
     clearTimeout(this.timer);
-    if (this.game && this.game.winner === -1) this.game.winner = winner;
+    if (this.game && !this.game.done) {
+      this.game.done = true;
+      this.game.result = { winner, reason };
+    }
     this.players.forEach((c) => send(c, { t: 'over', winner, reason, clocks: this.clocks }));
   }
 
@@ -178,7 +239,7 @@ class Room {
     this.players[seat] = null;
     client.room = null;
     const other = this.players[1 - seat];
-    if (this.game && this.game.winner === -1 && other) {
+    if (this.game && !this.game.done && other) {
       this.finish(1 - seat, reason);
     }
     if (other) send(other, { t: 'opponent_left' });
@@ -215,7 +276,7 @@ function handle(client, msg) {
           client.seat = seat;
           send(client, { t: 'start', resumed: true, ...room.snapshot(seat) });
           send(room.players[1 - seat], { t: 'opponent_back' });
-          if (room.game.winner !== -1) send(client, { t: 'over', winner: room.game.winner, reason: 'goal' });
+          if (room.game.done) send(client, { t: 'over', ...room.game.result });
           return;
         }
       }
@@ -227,11 +288,12 @@ function handle(client, msg) {
       leaveQueue(client);
       const size = BOARD_SIZES.includes(msg.size) ? msg.size : 9;
       const time = TIMES.includes(msg.time) ? msg.time : 60;
-      const key = `${size}:${time}`;
+      const kind = KINDS.includes(msg.kind) ? msg.kind : 'koridor';
+      const key = `${kind}:${size}:${time}`;
       const waiting = queue.get(key);
       if (waiting && waiting !== client && waiting.ws.readyState === 1) {
         queue.delete(key);
-        const room = new Room(size, time, false);
+        const room = new Room(kind, size, time, false);
         room.add(waiting);
         room.add(client);
         room.start();
@@ -253,7 +315,8 @@ function handle(client, msg) {
       leaveQueue(client);
       const size = BOARD_SIZES.includes(msg.size) ? msg.size : 9;
       const time = TIMES.includes(msg.time) ? msg.time : 60;
-      const room = new Room(size, time, true);
+      const kind = KINDS.includes(msg.kind) ? msg.kind : 'koridor';
+      const room = new Room(kind, size, time, true);
       room.add(client);
       send(client, { t: 'room', code: room.code, size, time });
       return;
@@ -278,23 +341,23 @@ function handle(client, msg) {
     }
     case 'action': {
       const room = client.room;
-      if (!room?.game || room.game.winner !== -1) return;
+      if (!room?.game || room.game.done) return;
       if (room.game.turn !== client.seat) {
         send(client, { t: 'error', msg: 'Сейчас ход соперника.' });
         return;
       }
-      const move = sanitizeMove(msg.move);
+      const move = room.game.sanitize(msg.move);
       if (!move || !room.apply(move)) send(client, { t: 'reject', msg: 'Недопустимый ход.' });
       return;
     }
     case 'resign': {
       const room = client.room;
-      if (room?.game && room.game.winner === -1) room.finish(1 - client.seat, 'resign');
+      if (room?.game && !room.game.done) room.finish(1 - client.seat, 'resign');
       return;
     }
     case 'rematch': {
       const room = client.room;
-      if (!room?.game || room.game.winner === -1) return;
+      if (!room?.game || !room.game.done) return;
       room.rematch[client.seat] = true;
       const other = room.players[1 - client.seat];
       if (!other) {
@@ -339,7 +402,7 @@ wss.on('connection', (ws) => {
     const room = client.room;
     if (!room) return;
     const seat = room.seatOf(client);
-    if (room.game && room.game.winner === -1 && seat !== -1) {
+    if (room.game && !room.game.done && seat !== -1) {
       // Даём время переподключиться
       send(room.players[1 - seat], { t: 'opponent_dropped', grace: RECONNECT_GRACE_MS });
       room.dropTimers[seat] = setTimeout(() => {

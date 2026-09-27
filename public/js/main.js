@@ -5,12 +5,14 @@ import { BOT_LEVELS } from './core/ai.js';
 import { BoardView } from './render/board3d.js';
 import { skinThumb, setThumb, hasThumb } from './render/thumbs.js';
 import { applyBackground } from './render/backdrop.js';
-import { SKIN_KINDS, SETS, findSkin, setPrice } from './data/skins.js';
+import { SKIN_KINDS, SETS, GAME_SKIN_KINDS, findSkin, setPrice } from './data/skins.js';
 import { state, save, subscribe, isOwned, buy, buySet, equipSet, equip, claimBonus, resetProgress, applyCloudSave, addCoins, playerName } from './state/store.js';
 import { $, $$, h, icon, coinIcon, modal, toast } from './ui/dom.js';
 import { icons } from './ui/icons.js';
 import { sfx, setPaused } from './audio.js';
 import { Match } from './ui/game.js';
+import { Match8, createEngine, GAME_TITLES } from './ui/match8.js';
+import { Board8View } from './render/board8.js';
 import { OnlineClient, inviteLink } from './net/online.js';
 import { watchRewarded, AD_REWARD } from './ui/ads.js';
 import * as platform from './platform/yandex.js';
@@ -30,7 +32,25 @@ const MODES = [
 
 const SHOP_PAGE = 8;
 
-let view = null; // единственный 3D-вид, переезжает между экранами
+let view = null; // 3D-вид Коридора, переезжает между экранами
+let view8 = null; // 3D-вид шахмат и шашек
+
+const GAMES = {
+  koridor: { title: 'КОРИДОР', sub: 'ПРОВЕДИ ФИШКУ К ФИНИШУ', icon: 'grid', name: 'Коридор' },
+  chess: { title: 'ШАХМАТЫ', sub: 'ПОСТАВЬ МАТ КОРОЛЮ', icon: 'crown', name: 'Шахматы' },
+  checkers: { title: 'ШАШКИ', sub: 'ЗАБЕРИ ВСЕ ШАШКИ СОПЕРНИКА', icon: 'checker', name: 'Шашки' },
+};
+
+const currentGame = () => (GAMES[state.prefs.game] ? state.prefs.game : 'koridor');
+
+// Показать нужный 3D-вид в контейнере, второй — спрятать
+function showView(v, container, opts) {
+  const other = v === view ? view8 : view;
+  other.stop();
+  other.canvas.remove();
+  v.mount(container, opts);
+  v.start();
+}
 let match = null;
 let currentView = 'play';
 let shopKind = 'walls';
@@ -88,31 +108,51 @@ function setView(name) {
   $$('.view').forEach((v) => v.classList.toggle('active', v.dataset.view === name));
   if (name === 'play') mountMenuPreview();
   else if (name === 'rules') mountRulesPreview();
-  else view.stop();
+  else {
+    view.stop();
+    view8.stop();
+  }
   if (name === 'shop') renderShop();
   if (name === 'settings') renderSettings();
   $('.menu-main').scrollTop = 0;
 }
 
+function mountBoard8(container, sway) {
+  const game = currentGame();
+  view8.setKind(game);
+  view8.clearPieces();
+  view8.syncPieces(createEngine(game));
+  view8.highlight({});
+  view8.setFlipped(false);
+  view8.setTilt(sway ? 50 : 56);
+  showView(view8, container, { interactive: false, sway });
+}
+
 function mountMenuPreview() {
+  if (currentGame() !== 'koridor') {
+    mountBoard8($('#menu-stage'), state.settings.animations);
+    return;
+  }
   const n = state.prefs.size;
   view.setSize(n);
   view.syncState(demoGame(n));
   view.setFlipped(false);
   view.setTilt(Math.min(60, state.settings.tilt + 2));
   view.pulseStrip(0, false);
-  view.mount($('#menu-stage'), { interactive: false, sway: state.settings.animations });
-  view.start();
+  showView(view, $('#menu-stage'), { interactive: false, sway: state.settings.animations });
 }
 
 function mountRulesPreview() {
+  if (currentGame() !== 'koridor') {
+    mountBoard8($('#rules-stage'), false);
+    return;
+  }
   const n = state.prefs.size;
   view.setSize(n);
   view.syncState(demoGame(n));
   view.setFlipped(false);
   view.setTilt(58);
-  view.mount($('#rules-stage'), { interactive: false, sway: false });
-  view.start();
+  showView(view, $('#rules-stage'), { interactive: false, sway: false });
 }
 
 // ---------- Играть ----------
@@ -198,16 +238,52 @@ function botConfig() {
 }
 
 function startMatch(cfg) {
-  const full = { size: state.prefs.size, time: state.prefs.time, ...cfg };
+  const full = { size: state.prefs.size, time: state.prefs.time, game: currentGame(), ...cfg };
   document.activeElement?.blur?.();
-  view.stop();
   showScreen('screen-game');
-  match = new Match(full, {
-    view,
-    onExit: backToMenu,
-    onRestart: (next) => startMatch(next),
-  });
+  const deps = { onExit: backToMenu, onRestart: (next) => startMatch(next) };
+  if (full.game === 'chess' || full.game === 'checkers') {
+    view.stop();
+    view.canvas.remove();
+    view8.setSkins8({ pieces: full.game === 'chess' ? state.equipped.chessPieces : state.equipped.checkersPieces });
+    match = new Match8(full, { ...deps, view: view8 });
+  } else {
+    view8.stop();
+    view8.canvas.remove();
+    match = new Match(full, { ...deps, view });
+  }
   match.start();
+}
+
+// Переключение игры в меню
+function setGame(game) {
+  if (!GAMES[game]) return;
+  state.prefs.game = game;
+  save();
+  sfx.click();
+  renderGameSwitch();
+  renderPlayPanel();
+  renderRules();
+  applyEquipped();
+  if (!currentShopKinds().includes(shopKind)) {
+    shopKind = currentShopKinds()[0];
+    shopPage = 0;
+  }
+  setView(currentView);
+}
+
+function renderGameSwitch() {
+  const g = GAMES[currentGame()];
+  $('.logo h1').textContent = g.title;
+  $('.logo h1').style.fontSize = g.title.length > 7 ? '36px' : '';
+  $('.logo p').textContent = g.sub;
+  document.title = `${GAME_TITLES[currentGame()] || 'Коридор'} — настольная игра`;
+  const box = $('#game-switch');
+  box.innerHTML = '';
+  for (const [id, info] of Object.entries(GAMES)) {
+    box.append(h('button', { class: `game-btn${id === currentGame() ? ' active' : ''}`, onclick: () => setGame(id) }, icon(info.icon), h('span', {}, info.name)));
+  }
+  $('#btn-size').style.display = currentGame() === 'koridor' ? '' : 'none';
 }
 
 function backToMenu() {
@@ -331,6 +407,7 @@ function waitForStart(net, dialog) {
 
 function startOnline(net, msg) {
   startMatch({
+    game: msg.kind || 'koridor',
     mode: 'online',
     size: msg.size,
     time: msg.time,
@@ -371,7 +448,7 @@ async function startQuickMatch() {
   const text = dialog.el.querySelector('.search-text');
   if (text) text.textContent = 'Ищем случайного соперника…';
   waitForStart(conn.net, dialog);
-  conn.net.send({ t: 'quick', size: state.prefs.size, time: state.prefs.time });
+  conn.net.send({ t: 'quick', kind: currentGame(), size: state.prefs.size, time: state.prefs.time });
 }
 
 async function createRoom() {
@@ -416,7 +493,7 @@ async function createRoom() {
     dialog?.close();
     startOnline(net, msg);
   });
-  net.send({ t: 'create', size: state.prefs.size, time: state.prefs.time });
+  net.send({ t: 'create', kind: currentGame(), size: state.prefs.size, time: state.prefs.time });
 }
 
 async function joinRoom(code) {
@@ -496,7 +573,10 @@ function onPlus() {
 
 // ---------- Магазин ----------
 
-const SHOP_TABS = [...Object.entries(SKIN_KINDS).map(([k, d]) => [k, d.title]), ['sets', 'Наборы']];
+function currentShopKinds() {
+  const kinds = GAME_SKIN_KINDS[currentGame()];
+  return currentGame() === 'koridor' ? [...kinds, 'sets'] : kinds;
+}
 const colorIdx = {};
 
 // Превью рисуются по одному в фоне, чтобы вкладка открывалась мгновенно
@@ -534,6 +614,10 @@ function pumpThumbs() {
 
 function applyEquipped() {
   applySkinsToView();
+  if (view8) {
+    view8.setSkins8({ board8: state.equipped.board8, pieces: currentGame() === 'chess' ? state.equipped.chessPieces : state.equipped.checkersPieces });
+    view8.setAccent(findSkin('background', state.equipped.background).accent);
+  }
   applyBackground(state.equipped.background, { animate: state.settings.animations });
   view.setAccent(findSkin('background', state.equipped.background).accent);
 }
@@ -541,7 +625,9 @@ function applyEquipped() {
 function renderShop() {
   const tabs = $('#shop-tabs');
   tabs.innerHTML = '';
-  for (const [kind, title] of SHOP_TABS) {
+  if (!currentShopKinds().includes(shopKind)) shopKind = currentShopKinds()[0];
+  for (const kind of currentShopKinds()) {
+    const title = kind === 'sets' ? 'Наборы' : SKIN_KINDS[kind].title;
     tabs.append(
       h('button', {
         class: `tab${kind === shopKind ? ' active' : ''}`,
@@ -677,7 +763,8 @@ function notEnough(price) {
 function renderEquipped() {
   const box = $('#equipped-list');
   box.innerHTML = '';
-  for (const [kind, def] of Object.entries(SKIN_KINDS)) {
+  for (const kind of GAME_SKIN_KINDS[currentGame()]) {
+    const def = SKIN_KINDS[kind];
     const skin = findSkin(kind, state.equipped[kind]);
     box.append(h('div', { class: 'eq-row' }, thumbImg(kind, skin), h('div', {}, h('b', {}, def.title), h('span', {}, skin.name))));
   }
@@ -718,7 +805,45 @@ function onSkinClick(kind, skin) {
 
 // ---------- Правила ----------
 
+const RULES8 = {
+  chess: {
+    items: [
+      'Доска 8 × 8, у каждого 16 фигур: король, ферзь, 2 ладьи, 2 слона, 2 коня и 8 пешек. Белые ходят первыми.',
+      'Пешка ходит на одно поле вперёд (с начальной позиции — на два), бьёт по диагонали. Дойдя до последней горизонтали, превращается в любую фигуру.',
+      'Конь ходит буквой «Г» и перепрыгивает фигуры. Слон — по диагонали, ладья — по прямой, ферзь — в любом направлении, король — на одно поле.',
+      'Рокировка: король сдвигается на два поля к ладье, ладья перепрыгивает через него. Можно, если ни король, ни ладья ещё не ходили и король не под шахом.',
+      'Взятие на проходе: пешка, прошедшая два поля, может быть взята соседней пешкой так, будто прошла одно.',
+      'Шах — угроза королю, от неё нужно защититься. Мат — шах, от которого не уйти: это победа. Пат (нет ходов без шаха) — ничья.',
+      'Время как в шахматных часах: у каждого свой запас на всю партию.',
+    ],
+    controls: `<div><b>Управление</b><br>Нажмите на свою фигуру — появятся возможные ходы<br>Нажмите на поле — сделать ход</div><div><b>Подсказки</b><br>Зелёная точка — ход, красное кольцо — взятие<br>Красное поле — королю шах</div>`,
+  },
+  checkers: {
+    items: [
+      'Русские шашки: доска 8 × 8, играют только на тёмных полях. У каждого 12 шашек, белые ходят первыми.',
+      'Простая шашка ходит на одно поле вперёд по диагонали.',
+      'Бить обязательно! Шашка бьёт, перепрыгивая через шашку соперника на свободное поле за ней — и вперёд, и назад.',
+      'Если после взятия можно бить дальше — продолжаете тем же ходом. Сбитые шашки снимаются после хода.',
+      'Шашка, дошедшая до последнего ряда, становится дамкой. Дамка ходит и бьёт на любое расстояние по диагонали.',
+      'Побеждает тот, кто забрал все шашки соперника или лишил его ходов.',
+    ],
+    controls: `<div><b>Управление</b><br>Нажмите на свою шашку, затем на подсвеченное поле<br>При взятии укажите конечное поле — шашка пройдёт всю цепочку</div><div><b>Подсказки</b><br>Красное кольцо — поле, куда шашка придёт с взятием</div>`,
+  },
+};
+
 function renderRules() {
+  const game = currentGame();
+  if (RULES8[game]) {
+    const ol = $('#rules-list');
+    ol.innerHTML = '';
+    RULES8[game].items.forEach((t) => ol.append(h('li', {}, t)));
+    $('#controls-help').innerHTML = RULES8[game].controls;
+    $('.crown-note span:last-child').textContent = game === 'chess' ? 'Побеждает тот, кто первым поставит мат королю соперника!' : 'Побеждает тот, кто заберёт все шашки соперника или запрёт их!';
+    $$('.finish-label').forEach((el) => (el.style.display = 'none'));
+    return;
+  }
+  $$('.finish-label').forEach((el) => (el.style.display = ''));
+  $('.crown-note span:last-child').textContent = 'Побеждает тот, кто первым приведёт свою фишку на противоположную сторону!';
   const items = [
     'У каждого игрока фишка на поле 9 × 9 (можно выбрать 5 × 5, 7 × 7 или 11 × 11).',
     'Фишки начинают на своих концах поля (красная — сверху, синяя — снизу). Синие ходят первыми.',
@@ -896,7 +1021,10 @@ async function boot() {
   $('#menu-stage').prepend(canvas);
   view = new BoardView(canvas, { tilt: state.settings.tilt });
   view.animations = state.settings.animations;
+  view8 = new Board8View(document.createElement('canvas'), { tilt: 52 });
+  view8.animations = state.settings.animations;
   applyEquipped();
+  renderGameSwitch();
 
   subscribe(() => {
     renderCoins();
@@ -954,7 +1082,7 @@ async function connectOnlineSilently() {
 }
 
 // Для автотестов и отладки
-window.__koridor = { get match() { return match; }, get view() { return view; } };
+window.__koridor = { get match() { return match; }, get view() { return view; }, get view8() { return view8; }, setGame };
 
 // Кнопки не держат фокус: иначе пробел/Enter в игре «нажимали» бы их повторно
 document.addEventListener('pointerup', (e) => {
