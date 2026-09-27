@@ -2,17 +2,16 @@
 // подсветка ходов и «призрак» стены. Используется в меню, правилах и в игре.
 
 import * as THREE from 'three';
-import { wallMaterial, fieldMaterials, pawnMaterial, pawnIsFaceted, finishTileMaterial } from './materials.js';
+import { wallMaterial, wallGlowColor, fieldMaterials, pawnMaterial, pawnIsFaceted, finishTileMaterial, finishMaterial, finishGlow } from './materials.js';
 import { glowTexture, stripGlowTexture } from './textures.js';
 import { PLAYER_COLORS } from '../data/skins.js';
 
 export const GAP = 0.2;
 const TILE = 1 - GAP;
 const TILE_H = 0.18;
-const WALL_H = 0.6;
-const WALL_T = GAP * 0.85;
-const WALL_L = 2 - GAP * 0.35;
-const FRAME_W = 0.24;
+const WALL_H = 0.5;
+const WALL_T = GAP * 0.8;
+const FRAME_W = 0.32;
 const PAWN_SCALE = 1.45;
 
 const ease = {
@@ -86,7 +85,271 @@ function mergeGeometries(list) {
   return out;
 }
 
-const wallGeo = new THREE.BoxGeometry(WALL_L, WALL_H, WALL_T);
+// Стена стоит точно в борозде: длина — две клетки плюс борозда между ними,
+// концы совпадают с краями плиток
+const WALL_L = 2 * TILE + GAP;
+const wallGeo = boxWithWorldUV(new THREE.BoxGeometry(WALL_L, WALL_H, WALL_T), WALL_L, WALL_H, WALL_T, WALL_H);
+
+// UV пропорционально размерам граней, чтобы текстура не растягивалась
+function boxWithWorldUV(geo, sx, sy, sz, unit = 1) {
+  const uv = geo.attributes.uv;
+  const dims = [
+    [sz, sy], // +x
+    [sz, sy], // -x
+    [sx, sz], // +y
+    [sx, sz], // -y
+    [sx, sy], // +z
+    [sx, sy], // -z
+  ];
+  for (let f = 0; f < 6; f++) {
+    for (let i = 0; i < 4; i++) {
+      const k = f * 4 + i;
+      uv.setXY(k, (uv.getX(k) * dims[f][0]) / unit, (uv.getY(k) * dims[f][1]) / unit);
+    }
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
+// Плитки поля одной геометрией. planar=true — UV сверху по всей доске
+// (одна картина на всё поле), иначе у каждой плитки своя UV 0..1
+function tilesGeometry(n, cells, planar) {
+  const box = new THREE.BoxGeometry(TILE, TILE_H, TILE).toNonIndexed();
+  const bp = box.attributes.position.array;
+  const bn = box.attributes.normal.array;
+  const bu = box.attributes.uv.array;
+  const vc = bp.length / 3;
+  const pos = new Float32Array(cells.length * bp.length);
+  const nor = new Float32Array(cells.length * bn.length);
+  const uvs = new Float32Array(cells.length * vc * 2);
+  const h = (n - 1) / 2;
+  cells.forEach(([x, y], c) => {
+    const ox = x - h;
+    const oz = y - h;
+    for (let i = 0; i < vc; i++) {
+      const px = bp[i * 3] + ox;
+      const py = bp[i * 3 + 1] + TILE_H / 2;
+      const pz = bp[i * 3 + 2] + oz;
+      const o = (c * vc + i) * 3;
+      pos[o] = px;
+      pos[o + 1] = py;
+      pos[o + 2] = pz;
+      nor[o] = bn[i * 3];
+      nor[o + 1] = bn[i * 3 + 1];
+      nor[o + 2] = bn[i * 3 + 2];
+      const u = (c * vc + i) * 2;
+      if (planar) {
+        uvs[u] = (px + n / 2) / n;
+        uvs[u + 1] = 1 - (pz + n / 2) / n;
+      } else {
+        uvs[u] = bu[i * 2];
+        uvs[u + 1] = bu[i * 2 + 1];
+      }
+    }
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  return g;
+}
+
+let hazardTex = null;
+function hazardMaterial() {
+  if (!hazardTex) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#16171a';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = '#f2b822';
+    for (let i = -4; i < 8; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 32, 128);
+      ctx.lineTo(i * 32 + 16, 128);
+      ctx.lineTo(i * 32 + 16 + 128, 0);
+      ctx.lineTo(i * 32 + 128, 0);
+      ctx.fill();
+    }
+    hazardTex = new THREE.CanvasTexture(c);
+    hazardTex.colorSpace = THREE.SRGBColorSpace;
+    hazardTex.wrapS = hazardTex.wrapT = THREE.RepeatWrapping;
+  }
+  return new THREE.MeshStandardMaterial({ map: hazardTex, roughness: 0.6 });
+}
+
+// Украшения рамки по теме поля
+function buildDecor(g, n, skin, frameH) {
+  const type = skin.decor;
+  if (!type) return;
+  const A = n / 2 + FRAME_W / 2;
+  const col = new THREE.Color(skin.decorColor || '#888');
+  const rnd = (i, k) => {
+    const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  };
+  const corners = [[-A, -A], [A, -A], [-A, A], [A, A]];
+  // Точки вдоль рамки (без зон финишных линий посередине верх/низ)
+  const along = [];
+  for (let i = 0; i <= n; i += 2) {
+    const t = i - n / 2;
+    along.push([-A, t], [A, t]);
+  }
+  const add = (mesh, x, z, y = frameH) => {
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    g.add(mesh);
+    return mesh;
+  };
+  switch (type) {
+    case 'bolts': {
+      const geo = new THREE.CylinderGeometry(0.055, 0.055, 0.04, 16);
+      const mat = new THREE.MeshStandardMaterial({ color: '#b8bec8', metalness: 1, roughness: 0.3 });
+      for (const [x, z] of corners) add(new THREE.Mesh(geo, mat), x, z, frameH + 0.02);
+      for (const [x, z] of along) add(new THREE.Mesh(geo, mat), x, z, frameH + 0.02);
+      break;
+    }
+    case 'lights': {
+      const geo = new THREE.BoxGeometry(0.1, 0.05, 0.3);
+      const mat = new THREE.MeshBasicMaterial({ color: col, toneMapped: false });
+      for (const [x, z] of along) add(new THREE.Mesh(geo, mat), x, z, frameH + 0.02);
+      const cgeo = new THREE.BoxGeometry(0.22, 0.12, 0.22);
+      for (const [x, z] of corners) add(new THREE.Mesh(cgeo, mat), x, z, frameH + 0.05);
+      break;
+    }
+    case 'hazard': {
+      const mat = hazardMaterial();
+      const geo = new THREE.BoxGeometry(FRAME_W * 0.8, 0.03, n * 0.28);
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) add(new THREE.Mesh(geo, mat), sx * A, sz * n * 0.3, frameH + 0.01);
+      }
+      break;
+    }
+    case 'rocks':
+    case 'icerocks': {
+      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: type === 'icerocks' ? 0.2 : 0.9, flatShading: true });
+      let i = 0;
+      for (const [x, z] of [...corners, ...along.filter((_, k) => k % 3 === 0)]) {
+        const r = 0.12 + rnd(i, 1) * 0.16;
+        const m = add(new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), mat), x + (rnd(i, 2) - 0.5) * 0.3, z + (rnd(i, 3) - 0.5) * 0.3, frameH + r * 0.4);
+        m.rotation.set(rnd(i, 4) * 3, rnd(i, 5) * 3, 0);
+        m.scale.y = 0.7;
+        i++;
+      }
+      break;
+    }
+    case 'crystals': {
+      const mat = new THREE.MeshPhysicalMaterial({ color: col, emissive: col, emissiveIntensity: 0.6, roughness: 0.1, transparent: true, opacity: 0.85, flatShading: true });
+      let i = 0;
+      for (const [x, z] of [...corners, ...corners, ...along.filter((_, k) => k % 2 === 0)]) {
+        const hgt = 0.35 + rnd(i, 1) * 0.55;
+        const m = add(new THREE.Mesh(new THREE.OctahedronGeometry(0.12, 0), mat), x + (rnd(i, 2) - 0.5) * 0.25, z + (rnd(i, 3) - 0.5) * 0.25, frameH + hgt * 0.4);
+        m.scale.set(1, hgt / 0.24, 1);
+        m.rotation.set((rnd(i, 4) - 0.5) * 0.6, rnd(i, 5) * 3, (rnd(i, 6) - 0.5) * 0.6);
+        i++;
+      }
+      break;
+    }
+    case 'bushes':
+    case 'flowers': {
+      const leaf = new THREE.MeshStandardMaterial({ color: '#2f7a2c', roughness: 0.9, flatShading: true });
+      const petal = new THREE.MeshStandardMaterial({ color: '#ff6fb0', roughness: 0.6, emissive: '#ff3c8a', emissiveIntensity: 0.2 });
+      let i = 0;
+      for (const [x, z] of [...corners, ...along]) {
+        const r = 0.1 + rnd(i, 1) * 0.1;
+        add(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), leaf), x + (rnd(i, 2) - 0.5) * 0.2, z + (rnd(i, 3) - 0.5) * 0.3, frameH + r * 0.5);
+        if (type === 'flowers' && rnd(i, 4) > 0.3) add(new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), petal), x + (rnd(i, 5) - 0.5) * 0.2, z + (rnd(i, 6) - 0.5) * 0.3, frameH + r + 0.02);
+        i++;
+      }
+      break;
+    }
+    case 'pillars': {
+      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.9 });
+      const geo = new THREE.BoxGeometry(0.4, 0.5, 0.4);
+      for (const [x, z] of corners) add(new THREE.Mesh(geo, mat), x, z, frameH + 0.2);
+      break;
+    }
+    case 'spikes': {
+      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, metalness: 0.3 });
+      const geo = new THREE.ConeGeometry(0.07, 0.3, 6);
+      for (const [x, z] of [...corners, ...along]) add(new THREE.Mesh(geo, mat), x, z, frameH + 0.15);
+      break;
+    }
+    default:
+  }
+}
+
+// Построить доску: основание, плитки, рамка, декор, финишные линии.
+// Возвращает группу и ссылки на финишные линии (для анимации свечения).
+export function buildBoardMesh(n, skins, { checkerRows = true, surfSize } = {}) {
+  const g = new THREE.Group();
+  const mats = fieldMaterials(skins.field, surfSize);
+  const A = n / 2;
+  const frameH = 0.26;
+
+  // Основание: его верх — дно борозд между плитками
+  const baseSize = n + FRAME_W * 2;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(baseSize, 0.5, baseSize), [mats.base, mats.base, mats.groove, mats.base, mats.base, mats.base]);
+  base.position.y = -0.25;
+  base.receiveShadow = true;
+  g.add(base);
+
+  // Рамка
+  const fl = n + FRAME_W * 2;
+  const long = boxWithWorldUV(new THREE.BoxGeometry(fl, frameH, FRAME_W), fl, frameH, FRAME_W, 1.2);
+  const side = boxWithWorldUV(new THREE.BoxGeometry(FRAME_W, frameH, n), FRAME_W, frameH, n, 1.2);
+  for (const [geo, x, z] of [[long, 0, -(A + FRAME_W / 2)], [long, 0, A + FRAME_W / 2], [side, -(A + FRAME_W / 2), 0], [side, A + FRAME_W / 2, 0]]) {
+    const m = new THREE.Mesh(geo, mats.frame);
+    m.position.set(x, frameH / 2, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    g.add(m);
+  }
+
+  // Плитки: одна картина на всё поле; стартовые ряды — клетчатые
+  const main = [];
+  const rows = [];
+  for (let x = 0; x < n; x++) {
+    for (let y = 0; y < n; y++) (checkerRows && (y === 0 || y === n - 1) ? rows : main).push([x, y]);
+  }
+  const tiles = new THREE.Mesh(tilesGeometry(n, main, true), mats.surface);
+  tiles.receiveShadow = true;
+  g.add(tiles);
+  if (rows.length) {
+    const fr = new THREE.Mesh(tilesGeometry(n, rows, false), finishTileMaterial());
+    fr.receiveShadow = true;
+    g.add(fr);
+  }
+
+  buildDecor(g, n, mats.skin, frameH);
+
+  // Финишные линии на рамке: сверху — красного игрока, снизу — синего
+  const stripW = FRAME_W * 0.5;
+  const stripGeo = boxWithWorldUV(new THREE.BoxGeometry(n, 0.06, stripW), n, 0.06, stripW, stripW * 2);
+  const glowGeo = new THREE.PlaneGeometry(n + 0.8, 1);
+  const strips = [];
+  for (const [player, z] of [[1, -(A + FRAME_W / 2)], [0, A + FRAME_W / 2]]) {
+    const col = new THREE.Color(finishGlow(skins.finish, player));
+    const strip = new THREE.Mesh(stripGeo, finishMaterial(skins.finish, player));
+    strip.position.set(0, frameH + 0.03, z);
+    g.add(strip);
+    const glow = new THREE.Mesh(
+      glowGeo,
+      new THREE.MeshBasicMaterial({ map: stripGlowTexture(), color: col, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(0, frameH + 0.07, z);
+    g.add(glow);
+    const spill = new THREE.Mesh(glowGeo, glow.material.clone());
+    spill.rotation.x = -Math.PI / 2;
+    spill.material.opacity = 0.2;
+    spill.scale.set(1, 1.4, 1);
+    spill.position.set(0, TILE_H + 0.01, z + (player === 1 ? 0.6 : -0.6));
+    g.add(spill);
+    strips[player] = { strip, glow, spill, color: col };
+  }
+  return { group: g, strips };
+}
 
 export function createPawnMesh(skinId, player) {
   const group = new THREE.Group();
@@ -94,28 +357,17 @@ export function createPawnMesh(skinId, player) {
   mesh.castShadow = true;
   mesh.scale.setScalar(PAWN_SCALE);
   group.add(mesh);
-  // Цветное кольцо у основания — чтобы игроков было видно при любом скине
+  // Цветное кольцо у основания — сторона игрока видна при любом скине
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.33, 0.028, 10, 48),
-    new THREE.MeshStandardMaterial({
-      color: PLAYER_COLORS[player],
-      emissive: PLAYER_COLORS[player],
-      emissiveIntensity: 1.2,
-    }),
+    new THREE.TorusGeometry(0.34, 0.03, 12, 56),
+    new THREE.MeshBasicMaterial({ color: PLAYER_COLORS[player], toneMapped: false }),
   );
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 0.03;
   group.add(ring);
   const glow = new THREE.Mesh(
     new THREE.PlaneGeometry(1.5, 1.5),
-    new THREE.MeshBasicMaterial({
-      map: glowTexture(),
-      color: PLAYER_COLORS[player],
-      transparent: true,
-      opacity: 0.35,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
+    new THREE.MeshBasicMaterial({ map: glowTexture(), color: PLAYER_COLORS[player], transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
   );
   glow.rotation.x = -Math.PI / 2;
   glow.position.y = 0.01;
@@ -128,6 +380,17 @@ export function createWallMesh(skinId) {
   const mesh = new THREE.Mesh(wallGeo, wallMaterial(skinId));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  // Светящиеся стены отбрасывают цветной ореол на поле
+  const glowColor = wallGlowColor(skinId);
+  if (glowColor) {
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(WALL_L + 0.5, 0.8),
+      new THREE.MeshBasicMaterial({ map: stripGlowTexture(), color: glowColor, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = -WALL_H / 2 + TILE_H + 0.015;
+    mesh.add(glow);
+  }
   return mesh;
 }
 
@@ -195,7 +458,7 @@ export class BoardView {
     this.root.add(this.boardGroup, this.wallsGroup, this.fxGroup);
     this.tweens = [];
     this.n = 0;
-    this.skins = { walls: 'classic', field: 'classic', pawns: 'classic' };
+    this.skins = { field: 'c-graphite', walls: 'c-grey', pawns: 'c-player', pawnsOpp: 'c-player', finish: 'c-player', mySeat: 0 };
     this.wallMeshes = new Map();
     this.pawns = [];
     this.markers = [];
@@ -267,23 +530,30 @@ export class BoardView {
     return new THREE.Vector3(x - h + 0.5, WALL_H / 2, y - h + 0.5);
   }
 
+  // skins: { field, walls, pawns, pawnsOpp, finish }
   setSkins(skins) {
     const prev = this.skins;
     this.skins = { ...this.skins, ...skins };
     if (!this.n) return;
-    if (prev.field !== this.skins.field) this._buildBoard();
-    if (prev.walls !== this.skins.walls) {
-      const mat = wallMaterial(this.skins.walls);
-      this.wallMeshes.forEach((m) => {
-        m.material = mat;
-      });
+    if (prev.field !== this.skins.field || prev.finish !== this.skins.finish) this._buildBoard();
+    if (prev.walls !== this.skins.walls || prev.wallsOpp !== this.skins.wallsOpp || prev.mySeat !== this.skins.mySeat) {
+      for (const [key, m] of this.wallMeshes) {
+        const nm = createWallMesh(this.wallSkinFor(m.userData.player));
+        nm.userData.player = m.userData.player;
+        nm.position.copy(m.position);
+        nm.rotation.copy(m.rotation);
+        this.wallsGroup.remove(m);
+        this.wallsGroup.add(nm);
+        this.wallMeshes.set(key, nm);
+      }
     }
-    if (prev.pawns !== this.skins.pawns) this._buildPawns();
+    if (prev.pawns !== this.skins.pawns || prev.pawnsOpp !== this.skins.pawnsOpp || prev.mySeat !== this.skins.mySeat) this._buildPawns();
   }
 
   setSize(n) {
     if (this.n === n) return;
     this.n = n;
+    if (!n) return;
     this._buildBoard();
     this._buildPawns();
     this.clearWalls();
@@ -295,6 +565,12 @@ export class BoardView {
     this.root.rotation.y = flip ? Math.PI : 0;
   }
 
+  // Цвет подсветки под доской (из скина фона)
+  setAccent(color) {
+    this.accent = color;
+    if (this.underGlow) this.underGlow.material.color.set(color);
+  }
+
   _buildBoard() {
     const g = this.boardGroup;
     g.traverse((o) => {
@@ -302,106 +578,35 @@ export class BoardView {
     });
     g.clear();
     const n = this.n;
-    const mats = fieldMaterials(this.skins.field);
     const A = n / 2;
+    const built = buildBoardMesh(n, this.skins, { checkerRows: this.checkerRows !== false });
+    g.add(built.group);
+    this.strips = built.strips;
 
-    // Основание (видно в бороздах)
-    const baseSize = n + FRAME_W * 2 + 0.1;
-    const base = new THREE.Mesh(new THREE.BoxGeometry(baseSize, 0.5, baseSize), mats.base);
-    base.position.y = -0.25;
-    base.receiveShadow = true;
-    g.add(base);
+    // Мягкая тень и цветное свечение под доской — доска «стоит» в сцене
+    const shadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(n * 1.9, n * 1.9),
+      new THREE.MeshBasicMaterial({ map: glowTexture(), color: '#000000', transparent: true, opacity: 0.85, depthWrite: false }),
+    );
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = -0.52;
+    g.add(shadow);
+    this.underGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(n * 2.4, n * 2.4),
+      new THREE.MeshBasicMaterial({ map: glowTexture(), color: this.accent || '#2f5dff', transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
+    );
+    this.underGlow.rotation.x = -Math.PI / 2;
+    this.underGlow.position.y = -0.55;
+    g.add(this.underGlow);
 
-    // Рамка
-    const frameH = 0.22;
-    const fl = n + FRAME_W * 2;
-    const frameGeoLong = new THREE.BoxGeometry(fl, frameH, FRAME_W);
-    const frameGeoSide = new THREE.BoxGeometry(FRAME_W, frameH, n);
-    const sides = [
-      [frameGeoLong, 0, -(A + FRAME_W / 2)],
-      [frameGeoLong, 0, A + FRAME_W / 2],
-      [frameGeoSide, -(A + FRAME_W / 2), 0],
-      [frameGeoSide, A + FRAME_W / 2, 0],
-    ];
-    for (const [geo, x, z] of sides) {
-      const m = new THREE.Mesh(geo, mats.frame);
-      m.position.set(x, frameH / 2, z);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      g.add(m);
-    }
-    // Плитки: InstancedMesh (для шахмат — две группы). Крайние ряды —
-    // стартовые/финишные — в чёрно-белую клетку, как финишный флаг.
-    const tileGeo = new THREE.BoxGeometry(TILE, TILE_H, TILE);
-    const tileMats = [...mats.tiles, finishTileMaterial()];
-    const finishGroup = tileMats.length - 1;
-    const groups = tileMats.map(() => []);
-    for (let x = 0; x < n; x++) {
-      for (let y = 0; y < n; y++) {
-        const gi = y === 0 || y === n - 1 ? finishGroup : mats.tiles.length > 1 ? (x + y) % 2 : 0;
-        groups[gi].push([x, y]);
-      }
-    }
-    const tmp = new THREE.Object3D();
-    groups.forEach((cells, gi) => {
-      const inst = new THREE.InstancedMesh(tileGeo, tileMats[gi], cells.length);
-      cells.forEach(([x, y], i) => {
-        tmp.position.set(x - (n - 1) / 2, TILE_H / 2, y - (n - 1) / 2);
-        // лёгкий случайный поворот текстуры, чтобы плитки не выглядели одинаково
-        tmp.rotation.y = gi === finishGroup ? 0 : ((x * 7 + y * 13) % 4) * (Math.PI / 2);
-        tmp.updateMatrix();
-        inst.setMatrixAt(i, tmp.matrix);
-      });
-      inst.receiveShadow = true;
-      inst.castShadow = false;
-      g.add(inst);
-    });
-
-    // Финишные линии: красная сверху (старт красного, финиш синего), синяя снизу
-    const stripGeo = new THREE.BoxGeometry(n - 0.1, 0.05, FRAME_W * 0.55);
-    const glowGeo = new THREE.PlaneGeometry(n + 0.6, 0.9);
-    this.strips = [];
-    [
-      [1, -(A + FRAME_W / 2)],
-      [0, A + FRAME_W / 2],
-    ].forEach(([player, z]) => {
-      const col = new THREE.Color(PLAYER_COLORS[player]);
-      const strip = new THREE.Mesh(stripGeo, new THREE.MeshBasicMaterial({ color: col, toneMapped: false }));
-      strip.position.set(0, frameH + 0.03, z);
-      g.add(strip);
-      const glow = new THREE.Mesh(
-        glowGeo,
-        new THREE.MeshBasicMaterial({
-          map: stripGlowTexture(),
-          color: col,
-          transparent: true,
-          opacity: 0.55,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          toneMapped: false,
-        }),
-      );
-      glow.rotation.x = -Math.PI / 2;
-      glow.position.set(0, frameH + 0.07, z);
-      g.add(glow);
-      // Свечение, отражённое на ближнем ряду плиток
-      const spill = glow.clone();
-      spill.material = glow.material.clone();
-      spill.material.opacity = 0.22;
-      spill.scale.set(1, 1.6, 1);
-      spill.position.set(0, TILE_H + 0.01, z + (player === 1 ? 0.7 : -0.7));
-      g.add(spill);
-      this.strips[player] = { strip, glow, spill };
-    });
+    this.redLight.color.copy(built.strips[1].color);
+    this.blueLight.color.copy(built.strips[0].color);
     this.redLight.position.set(0, 1.2, -A);
     this.blueLight.position.set(0, 1.2, A);
     this.redLight.distance = this.blueLight.distance = Math.max(6, n * 0.8);
 
     // Плоскость для выбора клеток мышью
-    this.pickPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(n + 2, n + 2),
-      new THREE.MeshBasicMaterial({ visible: false }),
-    );
+    this.pickPlane = new THREE.Mesh(new THREE.PlaneGeometry(n + 2, n + 2), new THREE.MeshBasicMaterial({ visible: false }));
     this.pickPlane.rotation.x = -Math.PI / 2;
     this.pickPlane.position.y = TILE_H;
     g.add(this.pickPlane);
@@ -420,8 +625,10 @@ export class BoardView {
   _buildPawns() {
     this.pawns.forEach((p) => this.root.remove(p));
     const old = this.pawns.map((p) => p.position.clone());
+    const mine = this.skins.mySeat ?? 0;
     this.pawns = [0, 1].map((pl) => {
-      const m = createPawnMesh(this.skins.pawns, pl);
+      const skin = pl === mine ? this.skins.pawns : this.skins.pawnsOpp || 'c-player';
+      const m = createPawnMesh(skin, pl);
       this.root.add(m);
       return m;
     });
@@ -473,11 +680,17 @@ export class BoardView {
     });
   }
 
+  // Стены соперника — его скином (бот, онлайн), свои — своим
+  wallSkinFor(player) {
+    const mine = this.skins.mySeat ?? 0;
+    return player === undefined || player === mine || !this.skins.wallsOpp ? this.skins.walls : this.skins.wallsOpp;
+  }
+
   addWall(w, animate = true) {
     const key = `${w.x},${w.y},${w.o}`;
     if (this.wallMeshes.has(key)) return;
-    const mesh = createWallMesh(this.skins.walls);
-    mesh.material = wallMaterial(this.skins.walls);
+    const mesh = createWallMesh(this.wallSkinFor(w.player));
+    mesh.userData.player = w.player;
     const pos = this.wallPos(w.x, w.y);
     mesh.position.copy(pos);
     mesh.rotation.y = w.o === 'v' ? Math.PI / 2 : 0;

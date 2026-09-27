@@ -73,6 +73,12 @@ export class Match {
       return { top: Math.max(0, top + 4), bottom: Math.max(0, bottom + 4) };
     });
     v.animations = state.settings.animations;
+    // Мой скин — на моей фишке, у соперника — его скин (онлайн) или цвет игрока
+    v.setSkins({
+      mySeat: this.cfg.mode === 'online' ? this.cfg.you : 0,
+      pawnsOpp: this.cfg.oppSkin || 'c-player',
+      wallsOpp: this.cfg.oppWalls || null,
+    });
     v.syncState(this.game);
     v.setFlipped(this.bottomSeat === 1);
     v.clearMoves();
@@ -104,6 +110,7 @@ export class Match {
     this.view.showGhost(null);
     this.view.pulseStrip(0, false);
     this.view.setPadding(null);
+    this.view.setSkins({ mySeat: 0, pawnsOpp: 'c-player', wallsOpp: null });
     platform.gameplayStop();
   }
 
@@ -487,7 +494,7 @@ export class Match {
       await this.view.movePawn(player, move.x, move.y, jump);
     } else {
       sfx.wall();
-      this.view.addWall(move);
+      this.view.addWall({ ...move, player });
       await new Promise((r) => setTimeout(r, state.settings.animations ? 380 : 0));
     }
     this.busy = false;
@@ -626,7 +633,7 @@ export class Match {
       this.destroyed = true;
       this.destroy();
       this.resultModal?.close();
-      this.onRestart({ ...this.cfg, you: msg.you, names: msg.names, moves: msg.moves, clocks: msg.clocks });
+      this.onRestart({ ...this.cfg, you: msg.you, names: msg.names, moves: msg.moves, clocks: msg.clocks, oppSkin: msg.skins?.[1 - msg.you]?.pawns, oppWalls: msg.skins?.[1 - msg.you]?.walls });
     });
     net.on('disconnect', () => {
       if (!this.over) {

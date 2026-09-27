@@ -3,9 +3,10 @@
 import { Game, BOARD_SIZES, WALLS_BY_SIZE } from './core/quoridor.js';
 import { BOT_LEVELS } from './core/ai.js';
 import { BoardView } from './render/board3d.js';
-import { skinThumb } from './render/thumbs.js';
-import { SKIN_KINDS, findSkin } from './data/skins.js';
-import { state, save, subscribe, isOwned, buy, equip, claimBonus, resetProgress, applyCloudSave, addCoins, playerName } from './state/store.js';
+import { skinThumb, setThumb, hasThumb } from './render/thumbs.js';
+import { applyBackground } from './render/backdrop.js';
+import { SKIN_KINDS, SETS, findSkin, setPrice } from './data/skins.js';
+import { state, save, subscribe, isOwned, buy, buySet, equipSet, equip, claimBonus, resetProgress, applyCloudSave, addCoins, playerName } from './state/store.js';
 import { $, $$, h, icon, coinIcon, modal, toast } from './ui/dom.js';
 import { icons } from './ui/icons.js';
 import { sfx, setPaused } from './audio.js';
@@ -48,7 +49,9 @@ function showScreen(id) {
 }
 
 function applySkinsToView() {
-  view.setSkins({ ...state.equipped });
+  view.checkerRows = state.settings.checkerRows;
+  const { field, walls, pawns, finish } = state.equipped;
+  view.setSkins({ field, walls, pawns, finish });
 }
 
 // Декоративная позиция для превью в меню и правилах
@@ -183,9 +186,15 @@ function renderPlayPanel() {
 function onStart() {
   sfx.click();
   const mode = state.prefs.mode;
-  if (mode === 'bot') startMatch({ mode: 'bot', botLevel: state.prefs.botLevel });
+  if (mode === 'bot') startMatch(botConfig());
   else if (mode === 'online') startQuickMatch();
   else openFriendModal();
+}
+
+// Бот играет платными скинами — пусть игрок видит, что есть в магазине
+function botConfig() {
+  const pick = (list) => list[Math.floor(Math.random() * list.length)].id;
+  return { mode: 'bot', botLevel: state.prefs.botLevel, oppSkin: pick(SKIN_KINDS.pawns.list), oppWalls: pick(SKIN_KINDS.walls.list) };
 }
 
 function startMatch(cfg) {
@@ -285,7 +294,7 @@ function openJoinModal(prefill = '') {
 // ---------- Онлайн ----------
 
 async function connectOnline() {
-  const net = new OnlineClient(playerName());
+  const net = new OnlineClient(playerName(), { pawns: state.equipped.pawns, walls: state.equipped.walls });
   // Если сервер вернул нас в идущую партию — сразу открываем её
   net.on('start', (msg) => {
     $('#modal-root').innerHTML = '';
@@ -301,7 +310,7 @@ async function connectOnline() {
       body: h('div', {}, h('p', {}, 'Не удалось подключиться к игровому серверу. Проверьте интернет и попробуйте ещё раз.'), h('p', {}, 'А пока можно сыграть с ботом или с другом на одном устройстве.')),
       buttons: [
         { label: 'Закрыть', kind: 'ghost' },
-        { label: 'Играть с ботом', kind: 'primary', onClick: () => startMatch({ mode: 'bot', botLevel: state.prefs.botLevel }) },
+        { label: 'Играть с ботом', kind: 'primary', onClick: () => startMatch(botConfig()) },
       ],
     });
     return null;
@@ -330,6 +339,8 @@ function startOnline(net, msg) {
     names: msg.names,
     moves: msg.moves,
     clocks: msg.clocks,
+    oppSkin: msg.skins?.[1 - msg.you]?.pawns,
+    oppWalls: msg.skins?.[1 - msg.you]?.walls,
   });
 }
 
@@ -485,46 +496,73 @@ function onPlus() {
 
 // ---------- Магазин ----------
 
+const SHOP_TABS = [...Object.entries(SKIN_KINDS).map(([k, d]) => [k, d.title]), ['sets', 'Наборы']];
+const colorIdx = {};
+
+// Превью рисуются по одному в фоне, чтобы вкладка открывалась мгновенно
+const thumbQueue = [];
+let thumbBusy = false;
+function thumbImg(kind, skin, cls = '') {
+  const img = h('img', { alt: '', draggable: 'false', class: `thumb ${cls}` });
+  const make = () => (kind === 'sets' ? setThumb(skin) : skinThumb(kind, skin));
+  if (kind !== 'sets' && hasThumb(kind, skin.id)) img.src = make();
+  else {
+    img.classList.add('loading');
+    thumbQueue.push(() => {
+      if (!img.isConnected) return false;
+      img.src = make();
+      img.classList.remove('loading');
+      return true;
+    });
+    pumpThumbs();
+  }
+  return img;
+}
+
+function pumpThumbs() {
+  if (thumbBusy) return;
+  thumbBusy = true;
+  const step = () => {
+    let job = thumbQueue.shift();
+    // Пропускаем превью, которые уже не на экране
+    while (job && job() === false) job = thumbQueue.shift();
+    if (thumbQueue.length) setTimeout(step, 16);
+    else thumbBusy = false;
+  };
+  setTimeout(step, 16);
+}
+
+function applyEquipped() {
+  applySkinsToView();
+  applyBackground(state.equipped.background, { animate: state.settings.animations });
+  view.setAccent(findSkin('background', state.equipped.background).accent);
+}
+
 function renderShop() {
   const tabs = $('#shop-tabs');
   tabs.innerHTML = '';
-  for (const [kind, def] of Object.entries(SKIN_KINDS)) {
+  for (const [kind, title] of SHOP_TABS) {
     tabs.append(
-      h(
-        'button',
-        {
-          class: `tab${kind === shopKind ? ' active' : ''}`,
-          onclick: () => {
-            shopKind = kind;
-            shopPage = 0;
-            sfx.click();
-            renderShop();
-          },
+      h('button', {
+        class: `tab${kind === shopKind ? ' active' : ''}`,
+        onclick: () => {
+          shopKind = kind;
+          shopPage = 0;
+          sfx.click();
+          renderShop();
         },
-        def.title,
-      ),
+      }, title),
     );
   }
-  const list = SKIN_KINDS[shopKind].list;
-  const pages = Math.ceil(list.length / SHOP_PAGE);
+  const items = shopKind === 'sets' ? SETS.map((s) => ({ set: s })) : [{ colors: true }, ...SKIN_KINDS[shopKind].list.map((s) => ({ skin: s }))];
+  const pages = Math.ceil(items.length / SHOP_PAGE);
   shopPage = Math.min(shopPage, pages - 1);
   const grid = $('#shop-grid');
   grid.innerHTML = '';
-  for (const skin of list.slice(shopPage * SHOP_PAGE, (shopPage + 1) * SHOP_PAGE)) {
-    const owned = isOwned(shopKind, skin.id);
-    const equipped = state.equipped[shopKind] === skin.id;
-    const cls = ['skin-card', equipped && 'equipped', !owned && 'locked', !owned && state.coins < skin.price && 'cant'].filter(Boolean).join(' ');
-    const price = owned
-      ? h('div', { class: 'price owned' }, equipped ? 'Выбрано' : 'Надеть')
-      : h('div', { class: 'price' }, coinIcon(), String(skin.price));
-    grid.append(
-      h(
-        'button',
-        { class: cls, onclick: () => onSkinClick(shopKind, skin) },
-        h('img', { src: skinThumb(shopKind, skin), alt: skin.name, draggable: 'false' }),
-        h('div', { class: 'meta' }, h('div', { class: 'name' }, skin.name), price),
-      ),
-    );
+  for (const it of items.slice(shopPage * SHOP_PAGE, (shopPage + 1) * SHOP_PAGE)) {
+    if (it.colors) grid.append(colorCard(shopKind));
+    else if (it.set) grid.append(setCard(it.set));
+    else grid.append(skinCard(shopKind, it.skin));
   }
   const dots = $('#shop-dots');
   dots.innerHTML = '';
@@ -545,49 +583,121 @@ function renderShop() {
   renderEquipped();
 }
 
+function skinCard(kind, skin) {
+  const owned = isOwned(kind, skin.id);
+  const equipped = state.equipped[kind] === skin.id;
+  const cls = ['skin-card', equipped && 'equipped', !owned && 'locked', !owned && state.coins < skin.price && 'cant'].filter(Boolean).join(' ');
+  const price = owned ? h('div', { class: 'price owned' }, equipped ? 'Выбрано' : 'Надеть') : h('div', { class: 'price' }, coinIcon(), String(skin.price));
+  return h('button', { class: cls, onclick: () => onSkinClick(kind, skin) }, thumbImg(kind, skin), h('div', { class: 'meta' }, h('div', { class: 'name' }, skin.name), price));
+}
+
+// Одна карточка на все бесплатные цвета: листается стрелками
+function colorCard(kind) {
+  const colors = SKIN_KINDS[kind].colors;
+  if (colorIdx[kind] === undefined) colorIdx[kind] = Math.max(0, colors.findIndex((c) => c.id === state.equipped[kind]));
+  const skin = colors[colorIdx[kind]];
+  const equipped = state.equipped[kind] === skin.id;
+  const flip = (d) => (e) => {
+    e.stopPropagation();
+    colorIdx[kind] = (colorIdx[kind] + d + colors.length) % colors.length;
+    sfx.click();
+    card.replaceWith(colorCard(kind));
+  };
+  const card = h(
+    'div',
+    { class: `skin-card color-card${equipped ? ' equipped' : ''}`, role: 'button', tabindex: '0', onclick: () => onSkinClick(kind, skin) },
+    thumbImg(kind, skin),
+    h('button', { class: 'flip prev', 'aria-label': 'Предыдущий цвет', onclick: flip(-1) }, '‹'),
+    h('button', { class: 'flip next', 'aria-label': 'Следующий цвет', onclick: flip(1) }, '›'),
+    h(
+      'div',
+      { class: 'meta' },
+      h('div', { class: 'name' }, `${skin.name} · ${colorIdx[kind] + 1}/${colors.length}`),
+      h('div', { class: 'price owned' }, equipped ? 'Выбрано' : 'Бесплатно'),
+    ),
+  );
+  return card;
+}
+
+function setCard(set) {
+  const price = setPrice(set, isOwned);
+  const equipped = Object.entries(set.skins).every(([k, id]) => state.equipped[k] === id);
+  const cls = ['skin-card', 'set-card', equipped && 'equipped', price > 0 && 'locked', price > state.coins && 'cant'].filter(Boolean).join(' ');
+  const label = equipped ? h('div', { class: 'price owned' }, 'Выбрано') : price > 0 ? h('div', { class: 'price' }, coinIcon(), String(price), h('small', {}, ' −30%')) : h('div', { class: 'price owned' }, 'Надеть');
+  return h('button', { class: cls, onclick: () => onSetClick(set, price) }, thumbImg('sets', set), h('div', { class: 'meta' }, h('div', { class: 'name' }, set.name), label));
+}
+
+function onSetClick(set, price) {
+  if (price === 0) {
+    equipSet(set);
+    applyEquipped();
+    sfx.click();
+    toast(`Набор «${set.name}» надет`, 'success');
+    renderShop();
+    return;
+  }
+  const parts = Object.entries(set.skins).map(([k, id]) => `${SKIN_KINDS[k].title}: ${findSkin(k, id).name}`);
+  if (state.coins < price) {
+    notEnough(price);
+    return;
+  }
+  modal({
+    title: `Набор «${set.name}»`,
+    body: h('div', { style: { textAlign: 'center' } }, thumbImg('sets', set, 'modal-thumb'), h('p', {}, parts.join(' · ')), h('p', {}, 'Цена со скидкой 30%: ', h('b', {}, String(price)), ' монет')),
+    buttons: [
+      { label: 'Отмена', kind: 'ghost' },
+      {
+        label: 'Купить',
+        kind: 'primary',
+        onClick: () => {
+          if (buySet(set, price)) {
+            sfx.coin();
+            applyEquipped();
+            toast(`Набор «${set.name}» куплен и надет!`, 'success');
+            renderShop();
+          }
+        },
+      },
+    ],
+  });
+}
+
+function notEnough(price) {
+  sfx.error();
+  modal({
+    title: 'Не хватает монет',
+    body: h('p', {}, `Нужно ещё ${price - state.coins} монет. Побеждайте в партиях или посмотрите рекламу.`),
+    buttons: [
+      { label: 'Понятно', kind: 'ghost' },
+      { label: `Реклама +${AD_REWARD}`, icon: 'video', kind: 'gold', onClick: watchAdForCoins },
+    ],
+  });
+}
+
 function renderEquipped() {
   const box = $('#equipped-list');
   box.innerHTML = '';
   for (const [kind, def] of Object.entries(SKIN_KINDS)) {
     const skin = findSkin(kind, state.equipped[kind]);
-    box.append(
-      h(
-        'div',
-        { class: 'eq-row' },
-        h('img', { src: skinThumb(kind, skin), alt: '' }),
-        h('div', {}, h('b', {}, def.title), h('span', {}, `(${skin.name})`)),
-      ),
-    );
+    box.append(h('div', { class: 'eq-row' }, thumbImg(kind, skin), h('div', {}, h('b', {}, def.title), h('span', {}, skin.name))));
   }
 }
 
 function onSkinClick(kind, skin) {
   if (isOwned(kind, skin.id)) {
     equip(kind, skin.id);
-    applySkinsToView();
+    applyEquipped();
     sfx.click();
     renderShop();
     return;
   }
   if (state.coins < skin.price) {
-    sfx.error();
-    const buttons = [{ label: 'Понятно', kind: 'ghost' }];
-    buttons.push({ label: `Реклама +${AD_REWARD}`, icon: 'video', kind: 'gold', onClick: watchAdForCoins });
-    modal({
-      title: 'Не хватает монет',
-      body: h('p', {}, `Нужно ещё ${skin.price - state.coins} монет. Побеждайте в партиях, чтобы заработать!`),
-      buttons,
-    });
+    notEnough(skin.price);
     return;
   }
   modal({
     title: `Купить «${skin.name}»?`,
-    body: h(
-      'div',
-      { style: { textAlign: 'center' } },
-      h('img', { src: skinThumb(kind, skin), alt: '', style: { width: '220px', borderRadius: '12px' } }),
-      h('p', {}, `${SKIN_KINDS[kind].title} · `, h('b', {}, String(skin.price)), ' монет'),
-    ),
+    body: h('div', { style: { textAlign: 'center' } }, thumbImg(kind, skin, 'modal-thumb'), h('p', {}, `${SKIN_KINDS[kind].title} · `, h('b', {}, String(skin.price)), ' монет')),
     buttons: [
       { label: 'Отмена', kind: 'ghost' },
       {
@@ -597,7 +707,7 @@ function onSkinClick(kind, skin) {
           if (buy(kind, skin)) {
             sfx.coin();
             toast(`«${skin.name}» куплено и надето!`, 'success');
-            applySkinsToView();
+            applyEquipped();
             renderShop();
           }
         },
@@ -671,7 +781,13 @@ function renderSettings() {
     })),
     row('Наклон камеры', 'От «сверху» до низкого 2.5D', range('tilt', 40, 88, 1)),
     row('Поворачивать поле', 'В игре на одном устройстве — к тому, чей ход', sw('rotateHotseat')),
+    row('Клетчатые стартовые ряды', 'Ряды, где стоят фишки, в чёрно-белую клетку', sw('checkerRows', () => {
+      view.setSize(0);
+      applySkinsToView();
+      setView('settings');
+    })),
     row('Имя в онлайне', null, name),
+    row('Выйти из игры', 'Прогресс сохраняется автоматически', h('button', { class: 'btn ghost', onclick: onExit }, icon('exit'), 'Выход')),
     row(
       'Сбросить прогресс',
       'Монеты, скины и статистика',
@@ -688,7 +804,7 @@ function renderSettings() {
                 kind: 'danger',
                 onClick: () => {
                   resetProgress();
-                  applySkinsToView();
+                  applyEquipped();
                   renderAll();
                   toast('Прогресс сброшен');
                 },
@@ -703,14 +819,14 @@ function renderSettings() {
 
 function renderStats() {
   const st = state.stats;
-  const owned = Object.values(state.owned).reduce((a, l) => a + l.length, 0);
   const total = Object.values(SKIN_KINDS).reduce((a, k) => a + k.list.length, 0);
+  const ownedPaid = Object.values(state.owned).reduce((a, l) => a + l.length, 0);
   $('#stats').innerHTML = '';
   $('#stats').append(
     h('div', { class: 'stat' }, 'Сыграно партий', h('b', {}, String(st.played))),
     h('div', { class: 'stat' }, 'Побед', h('b', {}, String(st.wins))),
     h('div', { class: 'stat' }, 'Процент побед', h('b', {}, st.played ? `${Math.round((st.wins / st.played) * 100)}%` : '—')),
-    h('div', { class: 'stat' }, 'Скинов собрано', h('b', {}, `${owned} / ${total}`)),
+    h('div', { class: 'stat' }, 'Скинов собрано', h('b', {}, `${ownedPaid} / ${total}`)),
   );
 }
 
@@ -780,7 +896,7 @@ async function boot() {
   $('#menu-stage').prepend(canvas);
   view = new BoardView(canvas, { tilt: state.settings.tilt });
   view.animations = state.settings.animations;
-  applySkinsToView();
+  applyEquipped();
 
   subscribe(() => {
     renderCoins();
@@ -801,22 +917,9 @@ async function boot() {
   });
   $('#btn-plus').addEventListener('click', onPlus);
   $$('.btn-ad').forEach((b) => b.addEventListener('click', watchAdForCoins));
-  $('#btn-exit').addEventListener('click', onExit);
 
   renderAll();
   setView('play');
-
-  // Прогреваем превью магазина в фоне, чтобы вкладка открывалась мгновенно
-  const warm = [];
-  for (const [kind, def] of Object.entries(SKIN_KINDS)) def.list.forEach((s) => warm.push([kind, s]));
-  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 60));
-  const step = () => {
-    const item = warm.shift();
-    if (!item) return;
-    skinThumb(item[0], item[1]);
-    idle(step);
-  };
-  setTimeout(() => idle(step), 800);
 
   $('#loader').classList.add('hidden');
   platform.loadingReady();
@@ -827,9 +930,7 @@ async function boot() {
   else {
     // Переподключение к онлайн-партии после перезагрузки страницы
     try {
-      if (sessionStorage.getItem('koridor.resume')) {
-        await connectOnlineSilently();
-      }
+      if (sessionStorage.getItem('koridor.resume')) await connectOnlineSilently();
     } catch {
       // нет хранилища
     }
@@ -837,7 +938,7 @@ async function boot() {
 }
 
 async function connectOnlineSilently() {
-  const net = new OnlineClient(playerName());
+  const net = new OnlineClient(playerName(), { pawns: state.equipped.pawns, walls: state.equipped.walls });
   net.on('start', (msg) => startOnline(net, msg));
   try {
     const resumed = await net.connect();

@@ -120,6 +120,7 @@ class Room {
       size: this.size,
       time: this.time,
       names: this.players.map((c) => c?.name || 'Игрок'),
+      skins: this.players.map((c) => c?.skin || null),
       moves: this.game.history.map(({ type, x, y, o }) => (type === 'wall' ? { type, x, y, o } : { type, x, y })),
       turn: this.game.turn,
       clocks: this.currentClocks(),
@@ -199,6 +200,8 @@ function handle(client, msg) {
   switch (msg.t) {
     case 'hello': {
       client.name = String(msg.name || 'Игрок').slice(0, 20).trim() || 'Игрок';
+      const skinId = (v) => (typeof v === 'string' && /^[a-z0-9-]{1,24}$/.test(v) ? v : null);
+      client.skin = { pawns: skinId(msg.skin?.pawns) || 'c-player', walls: skinId(msg.skin?.walls) };
       // Переподключение к идущей партии
       if (msg.resume && typeof msg.resume.code === 'string') {
         const room = rooms.get(msg.resume.code);

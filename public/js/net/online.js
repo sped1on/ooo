@@ -15,8 +15,9 @@ export function serverUrl() {
 }
 
 export class OnlineClient {
-  constructor(name) {
+  constructor(name, skin = null) {
     this.name = name;
+    this.skin = skin;
     this.ws = null;
     this.handlers = {};
     this.closedByUser = false;
@@ -51,7 +52,7 @@ export class OnlineClient {
       }, timeout);
       ws.onopen = () => {
         const resume = this._loadResume();
-        this.send({ t: 'hello', name: this.name, resume });
+        this.send({ t: 'hello', name: this.name, skin: this.skin, resume });
       };
       ws.onmessage = (ev) => {
         let msg;

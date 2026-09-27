@@ -1,12 +1,14 @@
 // Сохранение прогресса игрока в localStorage: монеты, купленные скины, настройки.
 
+import { DEFAULT_SKINS, SKIN_KINDS, isPlain } from '../data/skins.js';
+
 const KEY = 'koridor.save.v1';
 const DAY = 24 * 60 * 60 * 1000;
 
 const DEFAULTS = {
   coins: 520,
-  owned: { walls: ['classic'], field: ['classic'], pawns: ['classic'] },
-  equipped: { walls: 'classic', field: 'classic', pawns: 'classic' },
+  owned: { walls: [], field: [], pawns: [], finish: [], background: [] },
+  equipped: { ...DEFAULT_SKINS },
   lastBonus: 0,
   updated: 0,
   stats: { played: 0, wins: 0 },
@@ -21,6 +23,7 @@ const DEFAULTS = {
     volume: 0.7,
     hints: true,
     autoWalls: true,
+    checkerRows: true,
     animations: true,
     tilt: 55,
     rotateHotseat: false,
@@ -28,8 +31,19 @@ const DEFAULTS = {
   },
 };
 
+// Старые или неизвестные id скинов заменяем значениями по умолчанию
+function sanitizeSkins(st) {
+  for (const kind of Object.keys(SKIN_KINDS)) {
+    const k = SKIN_KINDS[kind];
+    const known = (id) => k.colors.some((s) => s.id === id) || k.list.some((s) => s.id === id);
+    st.owned[kind] = (st.owned[kind] || []).filter((id) => k.list.some((s) => s.id === id));
+    if (!known(st.equipped[kind])) st.equipped[kind] = DEFAULT_SKINS[kind];
+  }
+  return st;
+}
+
 function merge(raw) {
-  return {
+  return sanitizeSkins({
     ...structuredClone(DEFAULTS),
     ...raw,
     owned: { ...DEFAULTS.owned, ...raw.owned },
@@ -37,7 +51,7 @@ function merge(raw) {
     stats: { ...DEFAULTS.stats, ...raw.stats },
     prefs: { ...DEFAULTS.prefs, ...raw.prefs },
     settings: { ...DEFAULTS.settings, ...raw.settings },
-  };
+  });
 }
 
 function load() {
@@ -84,7 +98,7 @@ export function addCoins(amount) {
 }
 
 export function isOwned(kind, id) {
-  return state.owned[kind].includes(id);
+  return isPlain(kind, id) || state.owned[kind].includes(id);
 }
 
 export function buy(kind, skin) {
@@ -95,6 +109,23 @@ export function buy(kind, skin) {
   state.equipped[kind] = skin.id;
   save();
   return true;
+}
+
+// Купить набор: все недостающие скины со скидкой, сразу надеть
+export function buySet(set, price) {
+  if (state.coins < price) return false;
+  state.coins -= price;
+  for (const [kind, id] of Object.entries(set.skins)) {
+    if (!isOwned(kind, id)) state.owned[kind].push(id);
+    state.equipped[kind] = id;
+  }
+  save();
+  return true;
+}
+
+export function equipSet(set) {
+  for (const [kind, id] of Object.entries(set.skins)) if (isOwned(kind, id)) state.equipped[kind] = id;
+  save();
 }
 
 export function equip(kind, id) {
