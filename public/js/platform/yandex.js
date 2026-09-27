@@ -25,6 +25,7 @@ function loadScript(src, timeout = 4000) {
 
 export async function initPlatform() {
   // На Яндекс Играх SDK доступен по относительному пути /sdk.js
+  if (window.KORIDOR_NO_SDK) return false;
   if (!window.YaGames) {
     const isLocal = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(location.hostname) || location.protocol === 'file:';
     if (isLocal && !new URLSearchParams(location.search).has('sdk')) return false;
@@ -192,4 +193,21 @@ export function requestExit() {
     // не поддерживается
   }
   return false;
+}
+
+// Параметр payload из ссылки вида https://yandex.ru/games/app/<id>?payload=<код>
+export function launchPayload() {
+  try {
+    return ysdk?.environment?.payload || '';
+  } catch {
+    return '';
+  }
+}
+
+// Ссылка-приглашение на игру в каталоге Яндекс Игр
+export function inviteUrl(code) {
+  const id = ysdk?.environment?.app?.id;
+  if (!id) return null;
+  const domain = ysdk?.environment?.i18n?.tld || 'ru';
+  return `https://yandex.${domain}/games/app/${id}?payload=${encodeURIComponent(code)}`;
 }

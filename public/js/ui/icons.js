@@ -1,0 +1,36 @@
+// Встроенные SVG-иконки (stroke/fill = currentColor)
+
+const s = (body, fill = false) =>
+  `<svg viewBox="0 0 24 24" aria-hidden="true" ${fill ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'}>${body}</svg>`;
+
+export const icons = {
+  play: s('<path d="M7 4.5v15l13-7.5z"/>', true),
+  cart: s('<path d="M3 4h2.2l2.3 11h10.8l2.2-8H7"/><circle cx="9.5" cy="19.5" r="1.4" fill="currentColor"/><circle cx="17" cy="19.5" r="1.4" fill="currentColor"/>'),
+  book: s('<path d="M3 5.5C5.5 4.5 8.5 4.5 12 6.5c3.5-2 6.5-2 9-1v13c-2.5-1-5.5-1-9 1-3.5-2-6.5-2-9-1z" fill="currentColor" stroke="none"/><path d="M12 6.5v13" stroke="#0b1220" stroke-width="1.5"/>', false),
+  gear: s('<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M4.2 6.2l2.1 2.1M17.7 15.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 17.8l2.1-2.1M17.7 8.3l2.1-2.1"/><circle cx="12" cy="12" r="6.5"/>'),
+  exit: s('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
+  clock: s('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  robot: s('<rect x="4" y="8" width="16" height="11" rx="3"/><circle cx="9" cy="13.5" r="1.4" fill="currentColor"/><circle cx="15" cy="13.5" r="1.4" fill="currentColor"/><path d="M12 8V4.5M2 12.5v3M22 12.5v3"/><circle cx="12" cy="4" r="1" fill="currentColor"/>'),
+  globe: s('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18"/>'),
+  users: s('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.5-4 3.2-6 6.5-6s6 2 6.5 6"/><circle cx="17" cy="9" r="2.8"/><path d="M16.5 14c2.8 0 4.6 1.8 5 5"/>'),
+  user: s('<circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4.5 4-7 8-7s7.3 2.5 8 7"/>'),
+  grid: s('<rect x="3" y="3" width="5" height="5" rx="1"/><rect x="9.5" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><rect x="16" y="9.5" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><rect x="9.5" y="16" width="5" height="5" rx="1"/><rect x="16" y="16" width="5" height="5" rx="1"/>', true),
+  shirt: s('<path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z"/>', true),
+  crown: s('<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/><circle cx="3" cy="7" r="1.5"/><circle cx="12" cy="4" r="1.5"/><circle cx="21" cy="7" r="1.5"/>', true),
+  plus: s('<path d="M12 5v14M5 12h14"/>'),
+  rotate: s('<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>'),
+  wall: s('<rect x="3" y="10" width="18" height="4.5" rx="1"/>', true),
+  pawn: s('<circle cx="12" cy="6.5" r="3.2"/><path d="M9.5 10.5h5l1 6h-7z"/><path d="M6.5 20.5c0-2 2-3.5 5.5-3.5s5.5 1.5 5.5 3.5z"/>', true),
+  flag: s('<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'),
+  undo: s('<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
+  menu: s('<path d="M4 6h16M4 12h16M4 18h16"/>'),
+  close: s('<path d="M6 6l12 12M18 6 6 18"/>'),
+  copy: s('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>'),
+  link: s('<path d="M10 14a4 4 0 0 0 5.7 0l3.5-3.5a4 4 0 0 0-5.7-5.7L12 6.3"/><path d="M14 10a4 4 0 0 0-5.7 0l-3.5 3.5a4 4 0 0 0 5.7 5.7l1.5-1.5"/>'),
+  device: s('<rect x="5" y="2.5" width="14" height="19" rx="3"/><path d="M10 18.5h4"/>'),
+  sound: s('<path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>'),
+  video: s('<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/>'),
+  check: s('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+  trophy: s('<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H4.5c0 3 1.5 4.5 3.7 4.8M16 6h3.5c0 3-1.5 4.5-3.7 4.8M12 13v4M8 20h8M9.5 17h5v3h-5z"/>'),
+  eye: s('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+};

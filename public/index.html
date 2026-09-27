@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#070b16" />
+  <title>Коридор — проведи фишку к финишу</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- importmap-start -->
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js" } }
+  </script>
+  <!-- importmap-end -->
+</head>
+<body>
+  <div id="app">
+    <div class="bg"></div>
+
+    <!-- Главное меню -->
+    <section id="screen-menu" class="screen active">
+      <aside class="sidebar panel">
+        <div class="logo">
+          <span class="logo-crown"></span>
+          <h1>КОРИДОР</h1>
+          <p>ПРОВЕДИ ФИШКУ К ФИНИШУ</p>
+        </div>
+        <nav class="nav">
+          <button class="nav-btn active" data-view="play"><span class="ic" data-icon="play"></span>Играть</button>
+          <button class="nav-btn" data-view="shop"><span class="ic" data-icon="cart"></span>Магазин</button>
+          <button class="nav-btn" data-view="rules"><span class="ic" data-icon="book"></span>Правила</button>
+          <button class="nav-btn" data-view="settings"><span class="ic" data-icon="gear"></span>Настройки</button>
+        </nav>
+        <button class="btn ghost exit-btn" id="btn-exit"><span class="ic" data-icon="exit"></span>Выход</button>
+      </aside>
+
+      <main class="menu-main">
+        <div class="topbar">
+          <div class="coins-pill">
+            <span class="coin"></span><b id="coins">0</b>
+            <button class="plus-btn" id="btn-plus" aria-label="Получить монеты"><span class="ic" data-icon="plus"></span></button>
+          </div>
+        </div>
+
+        <div class="view view-play active" data-view="play">
+          <div class="panel play-panel">
+            <div class="section-head">
+              <span class="ic big" data-icon="clock"></span>
+              <div><h3>ВРЕМЯ ИГРЫ</h3><p>Сколько времени у вас на ход?</p></div>
+            </div>
+            <div class="choice-row times" id="time-choices"></div>
+            <div class="section-head">
+              <span class="ic big" data-icon="users"></span>
+              <div><h3>С КЕМ ИГРАТЬ?</h3><p>Выберите режим</p></div>
+            </div>
+            <div class="choice-row modes" id="mode-choices"></div>
+            <div class="choice-row levels" id="level-choices"></div>
+            <button class="btn primary huge" id="btn-start"><span class="ic" data-icon="play"></span>Играть</button>
+          </div>
+          <div class="stage" id="menu-stage">
+            <div class="stage-buttons">
+              <button class="btn ghost" id="btn-size"><span class="ic" data-icon="grid"></span><span>Поле: <b id="size-label">9 × 9</b></span></button>
+              <button class="btn ghost accent" id="btn-skins"><span class="ic" data-icon="shirt"></span>Скины</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="view view-shop" data-view="shop">
+          <div class="panel shop-panel">
+            <div class="section-head">
+              <span class="ic big" data-icon="cart"></span>
+              <div><h2>Магазин</h2><p>Покупайте скины для стен, поля и фишек</p></div>
+            </div>
+            <div class="tabs" id="shop-tabs"></div>
+            <div class="shop-grid" id="shop-grid"></div>
+            <div class="dots" id="shop-dots"></div>
+          </div>
+          <div class="panel skins-panel">
+            <h3>Ваши скины</h3>
+            <div id="equipped-list"></div>
+          </div>
+        </div>
+
+        <div class="view view-rules" data-view="rules">
+          <div class="panel rules-panel">
+            <div class="section-head">
+              <span class="ic big" data-icon="book"></span>
+              <div><h2>Правила</h2></div>
+            </div>
+            <ol class="rules" id="rules-list"></ol>
+            <div class="crown-note"><span class="ic" data-icon="crown"></span><span>Побеждает тот, кто первым приведёт свою фишку на противоположную сторону!</span></div>
+          </div>
+          <div class="panel example-panel">
+            <h3>Пример поля</h3>
+            <div class="example-stage" id="rules-stage">
+              <div class="finish-label top"><b class="red">Старт красного</b><span>финиш синего (от стены до стены)</span></div>
+              <div class="finish-label bottom"><b class="blue">Старт синего</b><span>финиш красного (от стены до стены)</span></div>
+            </div>
+            <div class="controls-help" id="controls-help"></div>
+          </div>
+        </div>
+
+        <div class="view view-settings" data-view="settings">
+          <div class="panel settings-panel">
+            <div class="section-head">
+              <span class="ic big" data-icon="gear"></span>
+              <div><h2>Настройки</h2><p>Звук, управление и камера</p></div>
+            </div>
+            <div class="settings" id="settings-list"></div>
+          </div>
+          <div class="panel stats-panel">
+            <h3>Статистика</h3>
+            <div id="stats"></div>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <!-- Экран партии -->
+    <section id="screen-game" class="screen">
+      <div class="game-stage" id="game-stage"></div>
+      <div class="hud">
+        <div class="hud-top">
+          <div class="player-card" id="card-0"></div>
+          <div class="turn-banner" id="turn-banner"></div>
+          <div class="player-card right" id="card-1"></div>
+        </div>
+        <div class="emotes" id="emotes"></div>
+        <div class="float-emote" id="float-emote"></div>
+        <div class="hud-bottom" id="action-bar"></div>
+      </div>
+    </section>
+
+    <div id="modal-root"></div>
+    <div id="toast" class="toast"></div>
+    <div id="loader" class="loader">
+      <div class="logo">
+        <span class="logo-crown"></span>
+        <h1>КОРИДОР</h1>
+        <div class="load-bar"><i></i></div>
+      </div>
+    </div>
+    <div id="fatal" class="fatal"></div>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

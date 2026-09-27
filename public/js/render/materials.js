@@ -125,7 +125,7 @@ export function pawnMaterial(id, player) {
           roughness: 0.28,
           metalness: 0.05,
           emissive: color,
-          emissiveIntensity: 0.12,
+          emissiveIntensity: 0.05,
         });
     }
   });

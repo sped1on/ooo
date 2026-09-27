@@ -131,10 +131,10 @@ function build(tex, skin, seed) {
   switch (tex) {
     case 'plain':
     case 'tile': {
-      const dark = mix(base, [0, 0, 0], 0.25);
-      const light = mix(base, [255, 255, 255], 0.12);
+      const dark = mix(base, [0, 0, 0], 0.18);
+      const light = mix(base, [255, 255, 255], 0.08);
       const map = paint((u, v) => {
-        const n = fbm(u * 8, v * 8, 4, 8);
+        const n = fbm(u * 4, v * 4, 4, 4) * 0.8 + noise(u * 128, v * 128, 128) * 0.2;
         // лёгкая фаска по краю
         const edge = Math.min(u, v, 1 - u, 1 - v);
         const bevel = edge < 0.04 ? 1.12 : 1;
