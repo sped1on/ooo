@@ -12,6 +12,7 @@ const DEFAULTS = {
   lastBonus: 0,
   updated: 0,
   stats: { played: 0, wins: 0 },
+  lessons: { koridor: { novice: 1, skilled: 1 }, chess: { novice: 1, skilled: 1 }, checkers: { novice: 1, skilled: 1 } },
   prefs: {
     time: 60,
     mode: 'online',
@@ -49,6 +50,7 @@ function merge(raw) {
     owned: { ...DEFAULTS.owned, ...raw.owned },
     equipped: { ...DEFAULTS.equipped, ...raw.equipped },
     stats: { ...DEFAULTS.stats, ...raw.stats },
+    lessons: { ...structuredClone(DEFAULTS.lessons), ...raw.lessons },
     prefs: { ...DEFAULTS.prefs, ...raw.prefs },
     settings: { ...DEFAULTS.settings, ...raw.settings },
   });

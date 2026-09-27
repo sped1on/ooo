@@ -400,7 +400,17 @@ export class Board8View extends BoardView {
 
   _overlay(sq, color, opacity, kind = 'square') {
     let mesh;
-    if (kind === 'dot') {
+    if (kind === 'star') {
+      const shape = new THREE.Shape();
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 ? 0.16 : 0.36;
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        if (i === 0) shape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+        else shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      shape.closePath();
+      mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false }));
+    } else if (kind === 'dot') {
       mesh = new THREE.Mesh(new THREE.CircleGeometry(0.14, 24), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
     } else if (kind === 'ring') {
       mesh = new THREE.Mesh(new THREE.RingGeometry(0.38, 0.47, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
@@ -425,8 +435,10 @@ export class Board8View extends BoardView {
   }
 
   // state: { last: [from,to], selected, targets: [{sq, capture}], check }
-  highlight({ last = null, selected = null, targets = [], check = null, hint = null } = {}) {
+  highlight({ last = null, selected = null, targets = [], check = null, hint = null, stars = [], goals = [] } = {}) {
     this.clearOverlays();
+    for (const sq of stars) this._overlay(sq, '#ffc93d', 0.95, 'star');
+    for (const sq of goals) this._overlay(sq, '#3db8ff', 0.45);
     if (last) for (const sq of last) this._overlay(sq, '#ffd54a', 0.32);
     if (check !== null && check >= 0) {
       const g = this._overlay(check, '#ff2d3d', 0.55);

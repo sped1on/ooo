@@ -64,3 +64,23 @@ test('шашки: бот доигрывает партию до конца', () 
   while (!g.result() && n++ < 300) assert.ok(g.play(chooseMove8(g, 'checkers', n % 2 ? 'medium' : 'easy')));
   assert.ok(g.result());
 });
+
+test('упражнения: генерация детерминирована и решаема', async () => {
+  const { makeLesson, minPawnMoves, koridorBoard, starsMinMoves } = await import('../public/js/core/lessons.js');
+  const { mateIn } = await import('../public/js/core/ai8.js');
+  const { Chess } = await import('../public/js/core/chess.js');
+  const { Checkers } = await import('../public/js/core/checkers.js');
+  for (const lv of [1, 7, 120, 2222, 5000]) {
+    for (const track of ['novice', 'skilled']) {
+      const a = makeLesson('koridor', track, lv);
+      assert.deepEqual(a, makeLesson('koridor', track, lv));
+      if (a.type === 'reach') assert.equal(minPawnMoves(koridorBoard(a.n, a.me, a.opp, a.walls)), a.maxMoves);
+      else assert.ok(a.target > a.base);
+      const c = makeLesson('chess', track, lv);
+      if (c.type === 'mate') assert.ok(mateIn(new Chess(c.fen), c.depth));
+      else assert.equal(starsMinMoves(c.fen, c.hero, c.stars), c.maxMoves);
+      const k = makeLesson('checkers', track, lv);
+      if (k.type === 'capture') assert.equal(Math.max(...new Checkers(k.setup).legalMoves().map((m) => m.captures.length)), k.need);
+    }
+  }
+});

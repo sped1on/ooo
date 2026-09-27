@@ -13,6 +13,8 @@ import { sfx, setPaused } from './audio.js';
 import { Match } from './ui/game.js';
 import { Match8, createEngine, GAME_TITLES } from './ui/match8.js';
 import { Board8View } from './render/board8.js';
+import { LessonRun, lessonProgress } from './ui/lesson.js';
+import { TRACKS, MAX_LEVEL } from './core/lessons.js';
 import { OnlineClient, inviteLink } from './net/online.js';
 import { watchRewarded, AD_REWARD } from './ui/ads.js';
 import * as platform from './platform/yandex.js';
@@ -113,6 +115,7 @@ function setView(name) {
     view8.stop();
   }
   if (name === 'shop') renderShop();
+  if (name === 'lessons') renderLessons();
   if (name === 'settings') renderSettings();
   $('.menu-main').scrollTop = 0;
 }
@@ -252,6 +255,102 @@ function startMatch(cfg) {
     view8.canvas.remove();
     match = new Match(full, { ...deps, view });
   }
+  match.start();
+}
+
+// ---------- Упражнения ----------
+
+let lessonTrack = 'novice';
+let levelPage = null;
+const LEVELS_PER_PAGE = 30;
+const TRACK_INFO = {
+  novice: { icon: 'book', desc: { koridor: 'Как ходит фишка, прыжки, стены — с объяснениями', chess: 'Как ходят фигуры, первые маты — с объяснениями', checkers: 'Ходы, взятия, дамки — с объяснениями' } },
+  skilled: { icon: 'trophy', desc: { koridor: 'Лабиринты и лучшие стены на прокачку логики', chess: 'Задачи: мат в 1 и мат в 2 хода', checkers: 'Комбинации: найдите самый сильный удар' } },
+};
+
+function renderLessons() {
+  const game = currentGame();
+  $('#lessons-title').textContent = `Упражнения · ${GAMES[game].name}`;
+  const tracks = $('#tracks');
+  tracks.innerHTML = '';
+  for (const [id, name] of Object.entries(TRACKS)) {
+    const cur = lessonProgress(game, id);
+    const pct = Math.round(((cur - 1) / MAX_LEVEL) * 100);
+    tracks.append(
+      h(
+        'div',
+        {
+          class: `track-card${id === lessonTrack ? ' selected' : ''}`,
+          onclick: () => {
+            lessonTrack = id;
+            levelPage = null;
+            sfx.click();
+            renderLessons();
+          },
+        },
+        h('div', { class: 'track-top' }, icon(TRACK_INFO[id].icon), h('div', {}, h('b', {}, name), h('small', {}, TRACK_INFO[id].desc[game]))),
+        h('div', { class: 'track-progress' }, h('i', { style: { width: `${Math.max(2, pct)}%` } })),
+        h(
+          'div',
+          { class: 'track-bottom' },
+          h('span', {}, `Уровень ${cur} из ${MAX_LEVEL}`),
+          h('button', { class: 'btn primary', onclick: (e) => { e.stopPropagation(); startLesson({ game, track: id, level: cur }); } }, icon('play'), 'Продолжить'),
+        ),
+      ),
+    );
+  }
+  const cur = lessonProgress(game, lessonTrack);
+  const pages = Math.ceil(MAX_LEVEL / LEVELS_PER_PAGE);
+  if (levelPage === null) levelPage = Math.floor((cur - 1) / LEVELS_PER_PAGE);
+  const from = levelPage * LEVELS_PER_PAGE + 1;
+  const to = Math.min(MAX_LEVEL, from + LEVELS_PER_PAGE - 1);
+  $('#level-range').textContent = `Уровни ${from}–${to}`;
+  const pager = $('#level-pager');
+  pager.innerHTML = '';
+  const go = (p) => () => {
+    levelPage = Math.max(0, Math.min(pages - 1, p));
+    renderLessons();
+  };
+  pager.append(
+    h('button', { class: 'btn ghost', disabled: levelPage === 0, onclick: go(levelPage - 1) }, '‹'),
+    h('button', { class: 'btn ghost', onclick: go(Math.floor((cur - 1) / LEVELS_PER_PAGE)) }, 'Текущий'),
+    h('button', { class: 'btn ghost', disabled: levelPage >= pages - 1, onclick: go(levelPage + 1) }, '›'),
+  );
+  const grid = $('#level-grid');
+  grid.innerHTML = '';
+  for (let lv = from; lv <= to; lv++) {
+    const status = lv < cur ? 'done' : lv === cur ? 'current' : 'locked';
+    grid.append(
+      h(
+        'button',
+        {
+          class: `level-btn ${status}${lv % 10 === 0 ? ' milestone' : ''}`,
+          disabled: status === 'locked',
+          title: status === 'locked' ? 'Пройдите предыдущие уровни' : `Уровень ${lv}`,
+          onclick: () => startLesson({ game, track: lessonTrack, level: lv }),
+        },
+        status === 'locked' ? icon('lock') : status === 'done' ? icon('star') : null,
+        h('span', {}, String(lv)),
+      ),
+    );
+  }
+}
+
+function startLesson(cfg) {
+  document.activeElement?.blur?.();
+  $('#modal-root').innerHTML = '';
+  showScreen('screen-game');
+  match = new LessonRun(cfg, {
+    view,
+    view8,
+    onExit: () => {
+      match = null;
+      showScreen('screen-menu');
+      $('#modal-root').innerHTML = '';
+      setView('lessons');
+    },
+    onPlay: (next) => startLesson(next),
+  });
   match.start();
 }
 
