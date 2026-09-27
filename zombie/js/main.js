@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { store, S, carStats, gunStats, armorTotal, give, levelInfo } from './state/save.js';
 import { initPlatform, loadCloud, loadingReady, gameplayStart, gameplayStop, onPause, showFullscreenAd, deviceType, playerName, submitScore, pendingPurchases } from './platform/yandex.js';
-import { unlockAudio, setAudioSettings, setPaused, playMusic, stopMusic, sfx } from './engine/audio.js';
+import { unlockAudio, setAudioSettings, setPaused, playMusic, stopMusic, sfx, engineMute } from './engine/audio.js';
 import { MenuScene, GarageScene } from './world/scenes.js';
 import { Level } from './game/level.js';
 import { initThumbs } from './ui/thumbs.js';
@@ -115,7 +115,7 @@ function applyRendererQuality() {
 
 function buildMenuScene() {
   const info = baseInfo(S().base);
-  app.menu = new MenuScene(info.biome, app.quality());
+  app.menu = new MenuScene(info.biome, app.quality(), info.name);
   app.menu.setCar(findCar(S().car), S().equip, carStats().weapon.model);
   app.menu.biomeBase = S().base;
   app.baseThumbUrl = null;
@@ -311,27 +311,21 @@ function bindInput() {
   canvas.addEventListener('pointerdown', (e) => {
     if (app.screenName !== 'game' || e.pointerType !== 'mouse') return;
     if (e.button === 0) app.mouseFire = true;
-    app.mouseLook = true;
-    // пешком на ПК захватываем мышь для обзора
-    if (app.level?.state === 'foot' && !document.pointerLockElement) {
-      try {
-        const r = canvas.requestPointerLock?.();
-        r?.catch?.(() => {});
-      } catch {
-        // обзор перетаскиванием
-      }
-    }
   });
   window.addEventListener('pointerup', () => {
     app.mouseFire = false;
-    app.mouseLook = false;
   });
+  // пешком: курсор остаётся видимым, обзор — движением мыши;
+  // у левого/правого края экрана взгляд продолжает поворачиваться
   window.addEventListener('mousemove', (e) => {
-    if (app.screenName !== 'game') return;
-    if (document.pointerLockElement === canvas || app.mouseLook) {
-      app.touchInput.lookDX += e.movementX || 0;
-      app.touchInput.lookDY += e.movementY || 0;
-    }
+    app.mouseX = e.clientX;
+    app.mouseY = e.clientY;
+    if (app.screenName !== 'game' || app.paused || app.level?.state !== 'foot') return;
+    app.touchInput.lookDX += (e.movementX || 0) * 1.3;
+    app.touchInput.lookDY += (e.movementY || 0) * 1.0;
+  });
+  document.addEventListener('mouseleave', () => {
+    app.mouseX = null;
   });
   bindGarageOrbit(canvas);
 }
@@ -402,7 +396,13 @@ function applyInput() {
   inp.fire = k.has('fire') || app.mouseFire || t.fire;
   inp.moveX = (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0) + t.joyX;
   inp.moveY = (k.has('up') ? 1 : 0) - (k.has('down') ? 1 : 0) + t.joyY;
-  inp.turn = (k.has('tright') ? 1 : 0) - (k.has('tleft') ? 1 : 0);
+  let edge = 0;
+  if (!isTouch && app.mouseX != null && lv.state === 'foot') {
+    const e = app.mouseX / app.w;
+    if (e < 0.06) edge = -(0.06 - e) / 0.06;
+    else if (e > 0.94) edge = (e - 0.94) / 0.06;
+  }
+  inp.turn = (k.has('tright') ? 1 : 0) - (k.has('tleft') ? 1 : 0) + edge * 1.2;
   inp.lookX = t.lookDX;
   inp.lookY = t.lookDY;
   t.lookDX = 0;
@@ -514,13 +514,9 @@ function levelEvent(type, data) {
 
 app.pause = () => {
   if (!app.level || app.paused) return;
-  try {
-    document.exitPointerLock?.();
-  } catch {
-    // нет захвата
-  }
   app.paused = true;
   app.level.paused = true;
+  engineMute(true);
   gameplayStop();
   app.keys.clear();
   const m = modal(
@@ -556,9 +552,11 @@ app.pause = () => {
 
 app.resume = () => {
   if (!app.paused) return;
-  app.pauseModal?.close?.();
-  app.pauseModal = null;
   app.paused = false;
+  const m = app.pauseModal;
+  app.pauseModal = null;
+  m?.close?.();
+  engineMute(false);
   if (app.level) {
     app.level.paused = false;
     if (app.level.state !== 'dead') gameplayStart();

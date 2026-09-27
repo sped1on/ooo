@@ -87,7 +87,10 @@ export function modal(content, { onClose, cls = '' } = {}) {
   const back = h('div', { class: 'modal-back' });
   const box = h('div', { class: `modal panel ${cls}` }, content);
   back.append(box);
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     back.remove();
     onClose?.();
   };

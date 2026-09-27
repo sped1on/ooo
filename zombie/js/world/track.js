@@ -142,9 +142,30 @@ export class Track {
   }
 
   // Высота земли (на дороге — высота дороги)
+  // Бетонные площадки и полы построек, по которым ездят и ходят
+  pad(s, x) {
+    const L = this.L;
+    // заправка: плита 26×44 м слева от дороги
+    if (x < -7 && x > -33 && Math.abs(s - this.stationS) < 22) return this.roadY(this.stationS) + 0.12;
+    // пол гаража на базах
+    if (Math.abs(x) < 6.8) {
+      if (s > -44 && s < -30) return this.roadY(0) + 0.1;
+      if (s > L + 30 && s < L + 44) return this.roadY(L) + 0.1;
+    }
+    // площадки баз
+    if (Math.abs(x) < 26 && ((s > -52 && s < 2) || (s > L - 2 && s < L + 52))) return this.roadY(s < L / 2 ? 0 : L) + 0.08;
+    // лагерь бандитов справа
+    if (x > 9 && x < 31 && Math.abs(s - this.campS) < 20) return this.roadY(this.campS) + 0.08;
+    return null;
+  }
+
   height(s, x, mesh = false) {
     const ry = this.roadY(s);
     const ax = Math.abs(x);
+    if (!mesh) {
+      const p = this.pad(s, x);
+      if (p !== null) return Math.max(p, ax <= ROAD_HALF + 0.3 ? ry : -1e9);
+    }
     if (ax <= ROAD_HALF + 0.3 && !(mesh && this.onBridge(s))) return ry;
     const f = this.frame(s, _fr2);
     const wx = f.x + f.rx * x;

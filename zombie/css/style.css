@@ -353,8 +353,8 @@ button {
 .menu-nav {
   position: absolute;
   left: 0.8rem;
-  top: 5.2rem;
-  width: 14.5rem;
+  top: 6.4rem;
+  width: 15.5rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -380,8 +380,8 @@ button {
 }
 
 .nav-btn.play {
-  height: 4.2rem;
-  font-size: 1.9rem;
+  height: 5.4rem;
+  font-size: 2.4rem;
   font-weight: 700;
   background: linear-gradient(#ffd43a, var(--yellow2));
   color: #111;
@@ -390,8 +390,8 @@ button {
 }
 
 .nav-btn.play .ic {
-  width: 2.2rem;
-  height: 2.2rem;
+  width: 2.8rem;
+  height: 2.8rem;
 }
 
 .nav-btn .dot {
@@ -2369,7 +2369,8 @@ button {
   .nav-btn.play {
     grid-column: 1 / -1;
     flex-direction: row;
-    height: 4.6rem;
+    height: 5.6rem;
+    margin-bottom: 0.4rem;
   }
 
   .base-card {

@@ -12,7 +12,7 @@ import { BIOMES } from '../data/catalog.js';
 // ------------------------------ главное меню: база снаружи ------------------------------
 
 export class MenuScene {
-  constructor(biomeKey, quality) {
+  constructor(biomeKey, quality, baseName) {
     this.biomeKey = biomeKey;
     const biome = BIOMES[biomeKey];
     const scene = (this.scene = new THREE.Scene());
@@ -72,6 +72,10 @@ export class MenuScene {
     r.position.x = P.BASE.gateHalf;
     r.rotation.y = Math.PI - 1.5;
     scene.add(l, r);
+    // название базы на воротах
+    const nameSign = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.62), new THREE.MeshBasicMaterial({ map: textTex((baseName || 'База 1').toUpperCase(), { color: '#f2c21b', size: 84 }), transparent: true }));
+    nameSign.position.set(0, 5.2, 0.37);
+    scene.add(nameSign);
 
     // деревья вокруг
     const rng = new Rng(biomeKey.length * 11);

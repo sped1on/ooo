@@ -354,7 +354,7 @@ export function hudScreen(app, level, touch) {
   look.addEventListener('pointercancel', lookEnd);
   footCtl.append(cross);
   if (touch) footCtl.append(look, joy);
-  else footCtl.append(h('div', { class: 'keys-hint', html: '<kbd>WASD</kbd> идти · мышь — осмотреться (клик захватывает мышь) · <kbd>←</kbd><kbd>→</kbd> поворот<br>стрельба сама, когда зомби в прицеле · <kbd>H</kbd> аптечка · <kbd>E</kbd> сесть в машину' }));
+  else footCtl.append(h('div', { class: 'keys-hint', html: '<kbd>WASD</kbd> идти · мышь — осмотреться (у края экрана — поворот) · <kbd>←</kbd><kbd>→</kbd> поворот<br>стрельба сама, когда зомби в прицеле · <kbd>H</kbd> аптечка · <kbd>E</kbd> сесть в машину' }));
   footCtl.append(fireBtn2, medBtn, enterBtn);
   el.append(driveCtl, footCtl);
 

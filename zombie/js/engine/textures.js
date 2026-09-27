@@ -557,3 +557,32 @@ export function materialTex(key) {
 }
 
 setTexFactory(materialTex);
+
+// Кроны леса сверху — для карты уровня
+export function canopyTex() {
+  return cached('canopy', () => {
+    const S = 512;
+    const c = canvas(S, S);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1d3a1f';
+    ctx.fillRect(0, 0, S, S);
+    const rng = new Rng(42);
+    const cols = ['#27492a', '#2f5530', '#223f24', '#35602f', '#3d6a33', '#1a3319'];
+    for (let i = 0; i < 1400; i++) {
+      const x = rng.f(0, S);
+      const y = rng.f(0, S);
+      const r = rng.f(5, 13);
+      const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
+      const col = rng.pick(cols);
+      g.addColorStop(0, '#4f7a3e');
+      g.addColorStop(0.35, col);
+      g.addColorStop(1, 'rgba(10,25,12,0.9)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const t = toTex(c);
+    return t;
+  });
+}

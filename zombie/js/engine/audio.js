@@ -310,14 +310,24 @@ export function engineStart() {
   for (const o of [main, sub, sec, lfo]) o.start(t);
   noiseSrc.start(t);
   engine = { main, sub, sec, lfo, nf, lp, out, lfoGain, noiseSrc, ng };
+  engineMuted = false;
   engineSet(0, 0.3);
   // стартер
   noise(0.5, { freq: 700, gain: 0.12, type: 'bandpass', q: 3, attack: 0.02, decay: 0.45 });
 }
 
+// Заглушить мотор (пауза, реклама)
+let engineMuted = false;
+export function engineMute(m) {
+  engineMuted = m;
+  if (!engine) return;
+  engine.out.gain.cancelScheduledValues(ctx.currentTime);
+  engine.out.gain.setTargetAtTime(m ? 0 : 0.07, ctx.currentTime, 0.05);
+}
+
 // rpm: 0..1 (холостые … отсечка), load: нагрузка (газ)
 export function engineSet(rpm, load = 0.5) {
-  if (!engine) return;
+  if (!engine || engineMuted) return;
   const t = ctx.currentTime;
   const r = Math.max(0, Math.min(1.1, rpm));
   const f = 26 + r * 62; // частота вспышек в цилиндрах, Гц

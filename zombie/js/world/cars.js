@@ -167,6 +167,7 @@ function mat(key, make) {
 }
 export const MAT = {
   glass: () => mat('glass', () => new THREE.MeshStandardMaterial({ color: 0x2a3c4c, roughness: 0.06, metalness: 0.35, transparent: true, opacity: 0.5, depthWrite: false })),
+  seeThrough: () => mat('seeThrough', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4, transparent: true, opacity: 0.25, depthWrite: false })),
   inside: () => mat('inside', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.05 })),
   trim: () => mat('trim', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.35 })),
   light: () => mat('light', () => new THREE.MeshBasicMaterial({ vertexColors: true })),
@@ -326,6 +327,8 @@ export function buildGrille(id, spec) {
   if (id === 'none' || !id) return null;
   const grp = new THREE.Group();
   const b = new GeoBuilder();
+  // всё, что закрывает стёкла, — почти прозрачное, чтобы из кабины было видно дорогу
+  const ws = new GeoBuilder();
   const { fb, ft } = windshield(spec);
   const cw = spec.cw;
   const dir = ft.clone().sub(fb);
@@ -342,7 +345,7 @@ export function buildGrille(id, spec) {
     const n = id === 'classic' ? 5 : 7;
     for (let i = 1; i <= n; i++) {
       const t = i / (n + 1);
-      b.beam(at(t, -cw / 2), at(t, cw / 2), 0.022, bar);
+      ws.beam(at(t, -cw / 2), at(t, cw / 2), 0.014, bar);
     }
     b.beam(at(0, -cw / 2 + 0.05), at(1, -cw / 2 + 0.05), 0.03, bar);
     b.beam(at(0, cw / 2 - 0.05), at(1, cw / 2 - 0.05), 0.03, bar);
@@ -351,14 +354,14 @@ export function buildGrille(id, spec) {
     // пластины на нижнюю часть лобового и боковые окна
     const p0 = at(0.02, 0, 0.08);
     const p1 = at(0.32, 0, 0.08);
-    b.plank(p0.clone().setX(0), p1.clone().setX(0), cw * 0.98, 0.04, '#4a4e55');
+    ws.plank(p0.clone().setX(0), p1.clone().setX(0), cw * 0.98, 0.03, '#4a4e55');
     const [rb, rt] = spec.cab;
     const mid = (rb[0] + fb.z) / 2;
     const len = Math.abs(fb.z - rb[0]) * 0.8;
     for (const sx of [1, -1]) {
       for (let i = 0; i < 4; i++) {
         const y = fb.y + 0.12 + i * ((rt[1] - fb.y - 0.2) / 4);
-        b.box(0.03, 0.03, len, bar, { x: sx * (cw / 2 + 0.06), y, z: mid });
+        ws.box(0.02, 0.02, len, bar, { x: sx * (cw / 2 + 0.06), y, z: mid });
       }
     }
   }
@@ -377,6 +380,11 @@ export function buildGrille(id, spec) {
   const m = new THREE.Mesh(b.build(), MAT.trim());
   m.castShadow = true;
   grp.add(m);
+  if (!ws.empty) {
+    const wm = new THREE.Mesh(ws.build(), MAT.seeThrough());
+    wm.renderOrder = 3;
+    grp.add(wm);
+  }
   if (id === 'mesh' || id === 'cage') {
     // сетка на лобовом стекле
     const len = fb.distanceTo(ft);
@@ -384,7 +392,7 @@ export function buildGrille(id, spec) {
     const tex = meshTex().clone();
     tex.needsUpdate = true;
     tex.repeat.set(cw * 3, len * 3);
-    const pm = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide, metalness: 0.5, roughness: 0.5 });
+    const pm = new THREE.MeshStandardMaterial({ map: tex, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, metalness: 0.5, roughness: 0.5 });
     const mesh = new THREE.Mesh(plane, pm);
     const center = fb.clone().lerp(ft, 0.5).add(nrm.clone().multiplyScalar(0.05));
     mesh.position.copy(center);
@@ -395,7 +403,7 @@ export function buildGrille(id, spec) {
     frame.beam(at(1, -cw / 2, 0.05), at(1, cw / 2, 0.05), 0.03, bar);
     frame.beam(at(0, -cw / 2, 0.05), at(1, -cw / 2, 0.05), 0.03, bar);
     frame.beam(at(0, cw / 2, 0.05), at(1, cw / 2, 0.05), 0.03, bar);
-    grp.add(new THREE.Mesh(frame.build(), MAT.trim()));
+    grp.add(new THREE.Mesh(frame.build(), MAT.seeThrough()));
   }
   return grp;
 }

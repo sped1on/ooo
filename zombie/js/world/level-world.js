@@ -167,6 +167,17 @@ export function buildLevelWorld(scene, track, biome, params, rng, opts = {}) {
     place(`wreck${v}`, () => P.wreck(v), s, x, { yaw: rng.f(-0.6, 0.6) + (rng.chance(0.5) ? Math.PI : 0), sink: 0.05 });
   }
 
+  // ---- дальний лес: дорога идёт через глухую чащу ----
+  const snowy = biome.name === 'Снега';
+  const nFar = Math.round(L * 11 * detail);
+  for (let i = 0; i < nFar; i++) {
+    const s = rng.f(track.s0, track.s1);
+    const x = rng.sign() * rng.f(24, 232);
+    if (blocked(s, x, 1) || !free(s, x, 1.4)) continue;
+    const v = rng.i(0, 3);
+    place(`far${v}${snowy}`, () => P.farTree(v, snowy), s, x, { yaw: rng.f(0, 6.28), scale: rng.f(0.9, 1.7), sink: 0.3 });
+  }
+
   // ---- деревья, кусты, камни, трава ----
   const trees = biome.trees;
   const treeMake = (t, v) => {
@@ -414,7 +425,7 @@ export function buildLevelWorld(scene, track, biome, params, rng, opts = {}) {
     car: { s: track.stationS + P.STATION.carSpot.z, x: -P.STATION.carSpot.x },
   };
 
-  sc.build(root, (key) => !key.startsWith('grass') && !key.startsWith('bush'));
+  sc.build(root, (key) => !key.startsWith('grass') && !key.startsWith('bush') && !key.startsWith('far'));
 
   return { root, pois, spawns, station, startBase, endBase, bases, canopy };
 }

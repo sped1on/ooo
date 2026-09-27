@@ -9,6 +9,7 @@ import { CarModel, Cockpit, buildCarWeapon } from '../world/cars.js';
 import { Humans, ZTYPES, poseRig } from '../world/characters.js';
 import { ViewModel } from '../world/guns.js';
 import { Particles } from '../engine/particles.js';
+import { canopyTex } from '../engine/textures.js';
 import { makePickup, makeObstacle, OBSTACLE_SIZE, projectileMesh, PICKUP_COLORS } from './pickups.js';
 import { BIOMES, baseInfo, levelParams, MEDKITS, pickZombieType } from '../data/catalog.js';
 import { sfx, engineStart, engineSet, engineStop } from '../engine/audio.js';
@@ -64,6 +65,17 @@ export class Level {
     this.track.buildMeshes(this.biome, scene);
     this.world = buildLevelWorld(scene, this.track, this.biome, this.params, this.rng, { detail: q.detail, fromName: this.fromInfo.name, toName: this.info.name });
     this.buildRoute();
+    // лесной покров до горизонта — виден на карте уровня
+    const ct = canopyTex();
+    ct.repeat.set(60, 60);
+    const cc = new THREE.Color('#ffffff');
+    if (this.biome.name === 'Снега') cc.set('#c8d4d8');
+    if (this.biome.name === 'Пустоши' || this.biome.name === 'Степь') cc.set('#d8d0a0');
+    this.canopy = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: ct, color: cc, fog: false }));
+    const bc = this.routeBox.getCenter(new THREE.Vector3());
+    this.canopy.position.set(bc.x, this.routeBox.min.y - 6, bc.z);
+    this.canopy.renderOrder = -5;
+    scene.add(this.canopy);
 
     // машина
     this.carModel = new CarModel(o.stats.car, { ...o.equip, weaponModel: o.stats.weapon.model });
@@ -143,7 +155,7 @@ export class Level {
     const pts = [];
     const uvs = [];
     const idx = [];
-    const half = 3.5;
+    const half = 5;
     let row = 0;
     for (let s = -20; s <= this.L + 20; s += 4) {
       const f = tr.frame(s, _fr);
@@ -169,7 +181,7 @@ export class Level {
     const tex = new THREE.CanvasTexture(c);
     tex.wrapT = THREE.RepeatWrapping;
     this.routeTex = tex;
-    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, fog: false, depthWrite: false }));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, fog: false, depthWrite: false, depthTest: false }));
     m.renderOrder = 5;
     this.route = m;
     this.scene.add(m);
@@ -432,6 +444,10 @@ export class Level {
   updateMap(dt) {
     this.scene.fog = null;
     this.route.visible = true;
+    this.canopy.visible = true;
+    this.sky.visible = false;
+    this.mountains.visible = false;
+    this.scene.background.set('#1d3a1f');
     this.routeTex.offset.y -= dt * 0.8;
     const mv = this.mapView;
     const box = this.routeBox;
@@ -482,6 +498,10 @@ export class Level {
     this.introT = 0;
     this.scene.fog = this.fog;
     this.route.visible = false;
+    this.canopy.visible = false;
+    this.sky.visible = true;
+    this.mountains.visible = true;
+    this.scene.background.set(this.biome.fog);
     this.camera.far = 2400;
     this.camera.updateProjectionMatrix();
     this.carModel.group.visible = true;

@@ -109,6 +109,19 @@ export function cliff(v = 0, col = '#7f7a74') {
   });
 }
 
+// Простая ёлка для дальнего леса (мало треугольников — их тысячи)
+export function farTree(v = 0, snow = false) {
+  return cached(`far${v}${snow}`, () => {
+    const b = new GeoBuilder();
+    const cols = ['#27492a', '#2f5530', '#223f24', '#35602f'];
+    b.cyl(0.15, 0.2, 1.2, 5, '#4a3424', { y: 0.6 });
+    b.cone(1.9, 4.2, 7, cols[v % 4], { y: 3.0, ry: v });
+    b.cone(1.3, 3.2, 7, cols[(v + 1) % 4], { y: 5.2, ry: v + 1 });
+    if (snow) b.cone(0.9, 1.2, 7, '#eef3f8', { y: 6.4 });
+    return b;
+  });
+}
+
 export function grassTuft(col = '#7f8a3e') {
   return cached(`grass${col}`, () => {
     const b = new GeoBuilder();
