@@ -1,0 +1,19 @@
+{
+  "name": "zombie-road",
+  "version": "1.0.0",
+  "description": "Дорога Зомби — 3D-игра для Яндекс Игр: прокачка машины, поездки между базами, зомби, заправка пешком",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/serve.mjs 8090",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/serve.mjs 8091 dist/yandex"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@fontsource/oswald": "^5.2.8",
+    "esbuild": "^0.28.2"
+  }
+}

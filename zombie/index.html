@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f15" />
+  <title>Дорога Зомби — выживание на колёсах</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- importmap-start -->
+  <script type="importmap">
+    { "imports": { "three": "./node_modules/three/build/three.module.js", "three/addons/": "./node_modules/three/examples/jsm/" } }
+  </script>
+  <!-- importmap-end -->
+</head>
+<body>
+  <div id="app">
+    <canvas id="gl"></canvas>
+    <div id="ui"></div>
+    <div id="loading">
+      <h1>ДОРОГА ЗОМБИ<small>Выживание на колёсах</small></h1>
+      <div class="lbar"><i></i></div>
+    </div>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
