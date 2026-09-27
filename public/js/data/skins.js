@@ -21,8 +21,8 @@ export const WALL_SKINS = [
 ];
 
 export const FIELD_SKINS = [
-  { id: 'classic', name: 'Классика', price: 100, tex: 'tile', color: '#262b38', frame: '#5a6274', base: '#0d1017', rough: 0.55 },
-  { id: 'ice', name: 'Лёд', price: 200, tex: 'ice', color: '#3aa7ec', frame: '#9fd8ff', base: '#0b2a44', rough: 0.15, glow: '#0a4a88' },
+  { id: 'classic', name: 'Классика', price: 100, tex: 'tile', color: '#262b38', frame: '#232836', base: '#0d1017', rough: 0.55 },
+  { id: 'ice', name: 'Лёд', price: 200, tex: 'ice', color: '#3aa7ec', frame: '#1d4a6e', base: '#0b2a44', rough: 0.15, glow: '#0a4a88' },
   { id: 'wood', name: 'Дерево', price: 150, tex: 'wood', color: '#9a6232', dark: '#5a3314', frame: '#5a3314', base: '#24140a', rough: 0.7 },
   { id: 'stone', name: 'Камень', price: 150, tex: 'stone', color: '#6f7580', frame: '#4c525c', base: '#1a1c21', rough: 0.9 },
   { id: 'neon', name: 'Неон', price: 250, tex: 'grid', color: '#120a24', frame: '#1c1236', base: '#07040f', glow: '#a04dff', rough: 0.4 },

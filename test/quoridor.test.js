@@ -77,3 +77,26 @@ test('автоход ведёт к цели', () => {
   const mv = g.autoMove(0);
   assert.deepEqual(mv, { type: 'move', x: 4, y: 7 });
 });
+
+test('бот не топчется на месте: не возвращается на клетку без причины', () => {
+  for (const level of ['easy', 'medium', 'hard']) {
+    const g = new Game(9);
+    const trail = [];
+    let dithering = 0;
+    while (g.winner === -1 && g.history.length < 300) {
+      if (g.turn === 0) {
+        g.play(g.autoMove(0));
+        continue;
+      }
+      const mv = chooseBotMove(g, level, () => 0.5);
+      if (mv.type === 'move') {
+        trail.push({ pos: `${mv.x},${mv.y}`, walls: g.walls.length });
+        const L = trail.length;
+        if (L >= 3 && trail[L - 1].pos === trail[L - 3].pos && trail[L - 3].walls === g.walls.length) dithering++;
+      }
+      assert.ok(g.play(mv));
+    }
+    assert.equal(dithering, 0, `бот ${level} ходит туда-обратно`);
+    assert.notEqual(g.winner, -1);
+  }
+});

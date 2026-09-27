@@ -134,3 +134,25 @@ export function pawnMaterial(id, player) {
 export function pawnIsFaceted(id) {
   return findSkin('pawns', id).style === 'crystal';
 }
+
+// Плитка стартового/финишного ряда: чёрно-белая клетка, как финишный флаг
+export function finishTileMaterial() {
+  return cached('finish-tile', () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    const k = 4;
+    const s = c.width / k;
+    for (let i = 0; i < k; i++) {
+      for (let j = 0; j < k; j++) {
+        ctx.fillStyle = (i + j) % 2 ? '#15171c' : '#e9ecf2';
+        ctx.fillRect(i * s, j * s, s, s);
+      }
+    }
+    const map = new THREE.CanvasTexture(c);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.magFilter = THREE.NearestFilter;
+    map.anisotropy = 4;
+    return new THREE.MeshStandardMaterial({ map, roughness: 0.5, metalness: 0.05 });
+  });
+}

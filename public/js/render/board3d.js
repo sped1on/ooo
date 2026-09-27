@@ -2,7 +2,7 @@
 // подсветка ходов и «призрак» стены. Используется в меню, правилах и в игре.
 
 import * as THREE from 'three';
-import { wallMaterial, fieldMaterials, pawnMaterial, pawnIsFaceted } from './materials.js';
+import { wallMaterial, fieldMaterials, pawnMaterial, pawnIsFaceted, finishTileMaterial } from './materials.js';
 import { glowTexture, stripGlowTexture } from './textures.js';
 import { PLAYER_COLORS } from '../data/skins.js';
 
@@ -12,7 +12,7 @@ const TILE_H = 0.18;
 const WALL_H = 0.6;
 const WALL_T = GAP * 0.85;
 const WALL_L = 2 - GAP * 0.35;
-const FRAME_W = 0.5;
+const FRAME_W = 0.24;
 const PAWN_SCALE = 1.45;
 
 const ease = {
@@ -313,7 +313,7 @@ export class BoardView {
     g.add(base);
 
     // Рамка
-    const frameH = 0.3;
+    const frameH = 0.22;
     const fl = n + FRAME_W * 2;
     const frameGeoLong = new THREE.BoxGeometry(fl, frameH, FRAME_W);
     const frameGeoSide = new THREE.BoxGeometry(FRAME_W, frameH, n);
@@ -330,30 +330,25 @@ export class BoardView {
       m.receiveShadow = true;
       g.add(m);
     }
-    // Светящиеся плашки по бокам рамки
-    const tickMat = new THREE.MeshStandardMaterial({ color: '#5d6679', roughness: 0.4, metalness: 0.4 });
-    const tickGeo = new THREE.BoxGeometry(0.16, 0.04, TILE * 0.9);
-    for (let i = 0; i < n; i++) {
-      for (const sx of [-1, 1]) {
-        const t = new THREE.Mesh(tickGeo, tickMat);
-        t.position.set(sx * (A + FRAME_W / 2), frameH + 0.02, i - (n - 1) / 2);
-        g.add(t);
-      }
-    }
-
-    // Плитки: InstancedMesh (для шахмат — две группы)
+    // Плитки: InstancedMesh (для шахмат — две группы). Крайние ряды —
+    // стартовые/финишные — в чёрно-белую клетку, как финишный флаг.
     const tileGeo = new THREE.BoxGeometry(TILE, TILE_H, TILE);
-    const groups = mats.tiles.map(() => []);
+    const tileMats = [...mats.tiles, finishTileMaterial()];
+    const finishGroup = tileMats.length - 1;
+    const groups = tileMats.map(() => []);
     for (let x = 0; x < n; x++) {
-      for (let y = 0; y < n; y++) groups[mats.tiles.length > 1 ? (x + y) % 2 : 0].push([x, y]);
+      for (let y = 0; y < n; y++) {
+        const gi = y === 0 || y === n - 1 ? finishGroup : mats.tiles.length > 1 ? (x + y) % 2 : 0;
+        groups[gi].push([x, y]);
+      }
     }
     const tmp = new THREE.Object3D();
     groups.forEach((cells, gi) => {
-      const inst = new THREE.InstancedMesh(tileGeo, mats.tiles[gi], cells.length);
+      const inst = new THREE.InstancedMesh(tileGeo, tileMats[gi], cells.length);
       cells.forEach(([x, y], i) => {
         tmp.position.set(x - (n - 1) / 2, TILE_H / 2, y - (n - 1) / 2);
         // лёгкий случайный поворот текстуры, чтобы плитки не выглядели одинаково
-        tmp.rotation.y = ((x * 7 + y * 13) % 4) * (Math.PI / 2);
+        tmp.rotation.y = gi === finishGroup ? 0 : ((x * 7 + y * 13) % 4) * (Math.PI / 2);
         tmp.updateMatrix();
         inst.setMatrixAt(i, tmp.matrix);
       });
@@ -363,8 +358,8 @@ export class BoardView {
     });
 
     // Финишные линии: красная сверху (старт красного, финиш синего), синяя снизу
-    const stripGeo = new THREE.BoxGeometry(n - 0.1, 0.06, 0.2);
-    const glowGeo = new THREE.PlaneGeometry(n + 0.6, 1.3);
+    const stripGeo = new THREE.BoxGeometry(n - 0.1, 0.05, FRAME_W * 0.55);
+    const glowGeo = new THREE.PlaneGeometry(n + 0.6, 0.9);
     this.strips = [];
     [
       [1, -(A + FRAME_W / 2)],
@@ -712,7 +707,7 @@ export class BoardView {
     const shift = (pad.top - pad.bottom) / 2;
     if (shift) this.camera.setViewOffset(size.x, size.y, 0, -shift, size.x, size.y);
     else this.camera.clearViewOffset();
-    const R = n / 2 + FRAME_W + 0.3;
+    const R = n / 2 + FRAME_W + 0.45;
     const th = THREE.MathUtils.degToRad(this.tilt);
     const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * (availH / size.y);
     const aspect = size.x / availH;

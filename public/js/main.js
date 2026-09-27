@@ -11,6 +11,7 @@ import { icons } from './ui/icons.js';
 import { sfx, setPaused } from './audio.js';
 import { Match } from './ui/game.js';
 import { OnlineClient, inviteLink } from './net/online.js';
+import { watchRewarded, AD_REWARD } from './ui/ads.js';
 import * as platform from './platform/yandex.js';
 
 const TIMES = [
@@ -328,7 +329,7 @@ function startOnline(net, msg) {
     you: msg.you,
     names: msg.names,
     moves: msg.moves,
-    remaining: msg.remaining,
+    clocks: msg.clocks,
   });
 }
 
@@ -336,7 +337,7 @@ async function startQuickMatch() {
   const dialog = modal({
     title: 'Поиск соперника',
     closable: false,
-    body: h('div', { style: { textAlign: 'center' } }, h('div', { class: 'spinner' }), h('p', { class: 'search-text' }, 'Подключаемся к серверу…'), h('p', {}, h('small', {}, `Поле ${state.prefs.size}×${state.prefs.size} · ${state.prefs.time / 60} мин на ход`))),
+    body: h('div', { style: { textAlign: 'center' } }, h('div', { class: 'spinner' }), h('p', { class: 'search-text' }, 'Подключаемся к серверу…'), h('p', {}, h('small', {}, `Поле ${state.prefs.size}×${state.prefs.size} · ${state.prefs.time / 60} мин на партию`))),
     buttons: [
       { label: 'Отмена', kind: 'ghost', onClick: () => conn?.net.close() },
       {
@@ -433,41 +434,53 @@ function renderCoins() {
   $('#coins').textContent = String(state.coins);
 }
 
-async function onPlus() {
+let adBusy = false;
+
+// Посмотреть рекламу и получить монеты
+async function watchAdForCoins() {
+  if (adBusy) return;
+  adBusy = true;
   sfx.click();
-  if (platform.isYandex()) {
-    modal({
-      title: 'Получить монеты',
-      body: h('div', {}, h('p', {}, 'Посмотрите короткую рекламу и получите 50 монет.')),
-      buttons: [
-        { label: 'Отмена', kind: 'ghost' },
-        {
-          label: '+50',
-          icon: 'video',
-          kind: 'gold',
-          onClick: async () => {
-            const ok = await platform.showRewardedAd();
-            if (ok) {
-              addCoins(50);
-              sfx.coin();
-              toast('+50 монет!', 'success');
-            } else {
-              toast('Реклама недоступна, попробуйте позже');
-            }
-          },
-        },
-      ],
+  try {
+    const ok = await watchRewarded();
+    if (ok) {
+      addCoins(AD_REWARD);
+      sfx.coin();
+      toast(`+${AD_REWARD} монет!`, 'success');
+      if (currentView === 'shop') renderShop();
+    } else {
+      toast('Реклама сейчас недоступна, попробуйте позже');
+    }
+  } finally {
+    adBusy = false;
+  }
+}
+
+function onPlus() {
+  sfx.click();
+  const buttons = [
+    { label: `Реклама +${AD_REWARD}`, icon: 'video', kind: 'gold', onClick: watchAdForCoins },
+  ];
+  if (!platform.isYandex()) {
+    buttons.unshift({
+      label: 'Бонус дня +100',
+      kind: 'ghost',
+      onClick: () => {
+        const r = claimBonus();
+        if (r.ok) {
+          sfx.coin();
+          toast(`Ежедневный бонус: +${r.amount} монет!`, 'success');
+        } else {
+          toast(`Следующий бонус через ${Math.ceil(r.left / 3_600_000)} ч.`);
+        }
+      },
     });
-    return;
   }
-  const r = claimBonus();
-  if (r.ok) {
-    sfx.coin();
-    toast(`Ежедневный бонус: +${r.amount} монет!`, 'success');
-  } else {
-    const hrs = Math.ceil(r.left / 3_600_000);
-    toast(`Следующий бонус через ${hrs} ч. Побеждайте, чтобы заработать монеты!`);
-  }
+  modal({
+    title: 'Получить монеты',
+    body: h('p', {}, `Посмотрите короткую рекламу и получите ${AD_REWARD} монет. Монеты также начисляются за победы.`),
+    buttons,
+  });
 }
 
 // ---------- Магазин ----------
@@ -559,7 +572,7 @@ function onSkinClick(kind, skin) {
   if (state.coins < skin.price) {
     sfx.error();
     const buttons = [{ label: 'Понятно', kind: 'ghost' }];
-    if (platform.isYandex()) buttons.push({ label: 'Монеты за рекламу', icon: 'video', kind: 'gold', onClick: onPlus });
+    buttons.push({ label: `Реклама +${AD_REWARD}`, icon: 'video', kind: 'gold', onClick: watchAdForCoins });
     modal({
       title: 'Не хватает монет',
       body: h('p', {}, `Нужно ещё ${skin.price - state.coins} монет. Побеждайте в партиях, чтобы заработать!`),
@@ -602,14 +615,15 @@ function renderRules() {
     'За ход можно либо передвинуть фишку на соседнюю свободную клетку, либо поставить стену.',
     'Стена закрывает проход сразу между двумя парами клеток. На поле 9 × 9 у каждого 10 стен. Полностью перекрыть сопернику путь к финишу нельзя.',
     'Если фишки стоят рядом, можно перепрыгнуть соперника. Если за ним стена или край поля — прыжок по диагонали.',
-    'Ваша цель — первым дойти до финиша на стороне противника.',
+    'Ваша цель — первым дойти до финиша (клетчатый ряд) на стороне противника.',
+    'Время как в шахматах: у каждого свой запас на всю партию, часы идут только в ваш ход. Время кончилось — поражение.',
   ];
   const ol = $('#rules-list');
   ol.innerHTML = '';
   items.forEach((t) => ol.append(h('li', {}, t)));
   $('#controls-help').innerHTML = `
-    <div><b>Компьютер</b><br>Клик — ход или стена<br><kbd>Пробел</kbd> — фишка/стена<br><kbd>R</kbd>, колесо, ПКМ — повернуть стену</div>
-    <div><b>Телефон</b><br>Касание клетки — ход<br>Режим «Стена»: коснитесь борозды, затем ещё раз — поставить</div>`;
+    <div><b>Компьютер</b><br>Клик по подсвеченной клетке — ход<br>Наведите на борозду — появится стена, клик — поставить<br><kbd>R</kbd>, колесо, ПКМ — повернуть стену</div>
+    <div><b>Телефон</b><br>Касание подсвеченной клетки — ход<br>Касание борозды — примерка стены, ещё касание — поставить</div>`;
 }
 
 // ---------- Настройки ----------
@@ -650,6 +664,7 @@ function renderSettings() {
   list.append(
     row('Звуки', 'Эффекты ходов, стен и таймера', sw('sound')),
     row('Громкость', null, range('volume', 0, 1, 0.05, () => sfx.tick())),
+    row('Умные стены', 'Стена появляется там, куда наведён курсор. Нажмите на подсвеченную клетку — ход фишкой, на борозду — поставить стену', sw('autoWalls')),
     row('Подсказки ходов', 'Подсвечивать клетки, куда можно пойти', sw('hints')),
     row('Анимации', 'Прыжки фишек, падение стен, покачивание', sw('animations', (v) => {
       view.animations = v;
@@ -785,6 +800,7 @@ async function boot() {
     setView('shop');
   });
   $('#btn-plus').addEventListener('click', onPlus);
+  $$('.btn-ad').forEach((b) => b.addEventListener('click', watchAdForCoins));
   $('#btn-exit').addEventListener('click', onExit);
 
   renderAll();

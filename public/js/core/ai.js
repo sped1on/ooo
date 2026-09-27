@@ -4,8 +4,8 @@
 import { Game } from './quoridor.js';
 
 export const BOT_LEVELS = {
-  easy: { name: 'Лёгкий', depth: 1, noise: 2.2, wallChance: 0.25 },
-  medium: { name: 'Средний', depth: 2, noise: 0.6, wallChance: 1 },
+  easy: { name: 'Лёгкий', depth: 1, noise: 1.1, wallChance: 0.25 },
+  medium: { name: 'Средний', depth: 2, noise: 0.4, wallChance: 1 },
   hard: { name: 'Сложный', depth: 3, noise: 0, wallChance: 1 },
 };
 
@@ -71,7 +71,9 @@ function orderedMoves(g, withWalls) {
 }
 
 function search(g, depth, alpha, beta, me, withWalls) {
-  if (depth === 0 || g.winner !== -1) return evaluate(g, me) * (1 + depth * 0.01);
+  // Победа раньше ценнее победы позже
+  if (g.winner !== -1) return evaluate(g, me) + (g.winner === me ? depth : -depth);
+  if (depth === 0) return evaluate(g, me);
   const maximizing = g.turn === me;
   let best = maximizing ? -Infinity : Infinity;
   for (const mv of orderedMoves(g, withWalls)) {
@@ -102,13 +104,26 @@ export function chooseBotMove(game, level = 'medium', rng = Math.random) {
 
   const withWalls = rng() < cfg.wallChance;
   const moves = orderedMoves(g, withWalls);
+  const distNow = g.distance(me);
+  // Клетки, где фишка бота была за последние ходы: возвращаться туда —
+  // значит топтаться на месте
+  const recent = g.history
+    .filter((h) => h.type === 'move' && h.player === me)
+    .slice(-4)
+    .map((h) => `${h.from.x},${h.from.y}`);
   const scored = [];
   for (const mv of moves) {
     g.play(mv);
     let v = search(g, cfg.depth - 1, -Infinity, Infinity, me, withWalls && cfg.depth > 1);
+    const distAfter = mv.type === 'move' ? g.distance(me) : distNow;
     g.undo();
     // Не тратим стены впустую: небольшой штраф за стену
     if (mv.type === 'wall') v -= 0.35;
+    if (mv.type === 'move') {
+      // Продвижение к финишу — бонус, отступление — штраф
+      v += (distNow - distAfter) * 0.45;
+      if (recent.includes(`${mv.x},${mv.y}`)) v -= 1.2;
+    }
     v += (rng() - 0.5) * cfg.noise;
     scored.push({ mv, v });
   }

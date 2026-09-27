@@ -20,6 +20,7 @@ const DEFAULTS = {
     sound: true,
     volume: 0.7,
     hints: true,
+    autoWalls: true,
     animations: true,
     tilt: 55,
     rotateHotseat: false,

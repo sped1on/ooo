@@ -6,6 +6,7 @@ import { $, h, icon, coinIcon, modal, toast, formatTime } from './dom.js';
 import { sfx } from '../audio.js';
 import { state, save, addCoins, playerName } from '../state/store.js';
 import * as platform from '../platform/yandex.js';
+import { watchRewarded } from './ads.js';
 
 const REWARDS = {
   bot: { easy: 20, medium: 40, hard: 80 },
@@ -18,7 +19,7 @@ const EMOTES = ['👍', '😮', '😎', '🤝', '😅'];
 
 export class Match {
   /**
-   * @param {object} cfg { mode: 'bot'|'hotseat'|'online', size, time, botLevel, net, you, names, moves, remaining }
+   * @param {object} cfg { mode: 'bot'|'hotseat'|'online', size, time, botLevel, net, you, names, moves, clocks }
    * @param {object} deps { view, onExit, onRestart }
    */
   constructor(cfg, deps) {
@@ -33,8 +34,10 @@ export class Match {
     this.busy = false;
     this.over = false;
     this.botTimer = null;
-    this.deadline = 0;
-    this.pausedLeft = 0;
+    // Шахматные часы: у каждого свой запас времени на всю партию
+    this.clocks = cfg.clocks ? cfg.clocks.slice() : [cfg.time * 1000, cfg.time * 1000];
+    this.turnStart = Date.now();
+    this.auto = !!state.settings.autoWalls;
     this.usedUndo = false;
     this.bottomSeat = cfg.mode === 'online' ? cfg.you : 0;
     this.names = this._names();
@@ -85,8 +88,7 @@ export class Match {
     if (this.cfg.mode === 'online') this._bindNet();
     platform.gameplayStart();
     sfx.start();
-    const rem = this.cfg.remaining;
-    this._beginTurn(rem);
+    this._beginTurn();
     this.timerInt = setInterval(() => this._tick(), 200);
   }
 
@@ -124,7 +126,7 @@ export class Match {
           h('div', { class: 'pc-sub' }, seat ? 'Красные · сверху' : 'Синие · снизу'),
           h('div', { class: 'pc-walls' }),
         ),
-        h('div', { class: 'pc-time' }, formatTime(this.cfg.time)),
+        h('div', { class: 'pc-time' }, formatTime(this.clocks[seat] / 1000)),
       );
       card.dataset.seat = seat;
     });
@@ -145,7 +147,9 @@ export class Match {
     this.btnUndo = btn('act-undo', 'undo', 'Отменить', () => this.undo());
     const btnResign = btn('act-resign', 'flag', 'Сдаться', () => this.confirmResign());
     const btnMenu = btn('act-menu', 'menu', 'Меню', () => this.confirmExit());
-    bar.append(this.btnMove, this.btnWall, this.btnRotate, this.btnConfirm, h('div', { class: 'sep' }));
+    // В режиме «умных стен» переключатель не нужен: стена следует за указателем
+    if (!this.auto) bar.append(this.btnMove, this.btnWall);
+    bar.append(this.btnRotate, this.btnConfirm, h('div', { class: 'sep' }));
     if (this.cfg.mode !== 'online') bar.append(this.btnUndo);
     bar.append(btnResign, btnMenu);
   }
@@ -206,57 +210,69 @@ export class Match {
     this.btnWall.classList.toggle('selected', this.mode === 'wall');
     this.btnMove.disabled = !mine;
     this.btnWall.disabled = !canWall;
-    this.btnRotate.disabled = !mine || this.mode !== 'wall';
+    this.btnRotate.disabled = !canWall || (!this.auto && this.mode !== 'wall');
     this.btnConfirm.style.display = this.pendingWall ? '' : 'none';
     this.btnUndo.disabled = this.over || this.busy || !this._canUndo();
   }
 
+  // Сколько времени осталось у игрока (мс)
+  _left(seat) {
+    if (seat !== this.game.turn || this.over || this.paused) return this.clocks[seat];
+    return Math.max(0, this.clocks[seat] - (Date.now() - this.turnStart));
+  }
+
   _tick() {
-    if (this.over || this.paused) return;
-    const left = (this.deadline - Date.now()) / 1000;
-    const i = this.game.turn === this.bottomSeat ? 0 : 1;
-    const card = $(`#card-${i}`);
-    const other = $(`#card-${1 - i}`);
-    const el = card.querySelector('.pc-time');
-    el.textContent = formatTime(left);
-    el.classList.toggle('low', left <= 10);
-    other.querySelector('.pc-time').textContent = formatTime(this.cfg.time);
-    other.querySelector('.pc-time').classList.remove('low');
-    const frac = Math.max(0, Math.min(1, left / this.cfg.time));
-    card.querySelector('.prog').setAttribute('stroke-dashoffset', String(157 * (1 - frac)));
-    other.querySelector('.prog').setAttribute('stroke-dashoffset', '0');
+    if (this.over) return;
+    const total = this.cfg.time * 1000;
+    for (let i = 0; i < 2; i++) {
+      const card = $(`#card-${i}`);
+      const seat = Number(card.dataset.seat);
+      const left = this._left(seat);
+      const el = card.querySelector('.pc-time');
+      el.textContent = formatTime(left / 1000);
+      el.classList.toggle('low', left <= 10_000 && seat === this.game.turn);
+      const frac = Math.max(0, Math.min(1, left / total));
+      card.querySelector('.prog').setAttribute('stroke-dashoffset', String(157 * (1 - frac)));
+    }
+    if (this.paused) return;
+    const turn = this.game.turn;
+    const left = this._left(turn) / 1000;
     const whole = Math.ceil(left);
-    if (whole <= 5 && whole > 0 && whole !== this._lastTick && this.isLocal(this.game.turn)) sfx.tick();
+    if (whole <= 5 && whole > 0 && whole !== this._lastTick && this.isLocal(turn)) sfx.tick();
     this._lastTick = whole;
-    if (left <= 0 && this.cfg.mode !== 'online' && !this.busy) {
-      // Время вышло — автоматический шаг по кратчайшему пути
+    if (left <= 0 && this.cfg.mode !== 'online') {
+      // Флаг упал — поражение по времени, как в шахматах
       clearTimeout(this.botTimer);
-      const mv = this.game.autoMove();
-      if (mv) {
-        toast('Время вышло — сделан автоматический ход');
-        this._apply(mv);
-      }
+      this.clocks[turn] = 0;
+      this._finish(1 - turn, 'timeout');
     }
   }
 
   _pause(p) {
-    // Пауза на время рекламы / сворачивания: замораживаем таймер (кроме онлайна)
+    // Пауза на время рекламы / сворачивания: останавливаем часы (кроме онлайна)
     if (this.cfg.mode === 'online' || this.over) return;
     if (p && !this.paused) {
+      this.clocks[this.game.turn] = this._left(this.game.turn);
       this.paused = true;
-      this.pausedLeft = this.deadline - Date.now();
     } else if (!p && this.paused) {
       this.paused = false;
-      this.deadline = Date.now() + this.pausedLeft;
+      this.turnStart = Date.now();
     }
+  }
+
+  // Списать с часов время, потраченное на ход
+  _charge(seat) {
+    if (this.paused) return;
+    this.clocks[seat] = this._left(seat);
+    this.turnStart = Date.now();
   }
 
   // ---------- Ход партии ----------
 
-  _beginTurn(remainingMs) {
+  _beginTurn() {
     this.pendingWall = null;
     this.view.showGhost(null);
-    this.deadline = Date.now() + (remainingMs ?? this.cfg.time * 1000);
+    if (this.cfg.mode !== 'online') this.turnStart = Date.now();
     const g = this.game;
     if (this.cfg.mode === 'hotseat' && state.settings.rotateHotseat) this._rotateBoard(g.turn === 1);
     if (this.mode === 'wall' && (g.wallsLeft[g.turn] <= 0 || !this.isLocal(g.turn))) this.mode = 'move';
@@ -270,7 +286,7 @@ export class Match {
         const mv = chooseBotMove(this.game, this.cfg.botLevel);
         this.busy = false;
         this._apply(mv);
-      }, 550 + Math.random() * 450);
+      }, 350 + Math.random() * 350);
     }
   }
 
@@ -288,7 +304,7 @@ export class Match {
 
   _refreshMarkers() {
     const g = this.game;
-    if (this.myTurn && this.mode === 'move' && state.settings.hints) {
+    if (this.myTurn && (this.auto || this.mode === 'move') && state.settings.hints) {
       this.view.showMoves(g.pawnMoves(g.turn), g.turn);
     } else {
       this.view.clearMoves();
@@ -311,7 +327,7 @@ export class Match {
   }
 
   rotateWall() {
-    if (this.mode !== 'wall') return;
+    if (!this.auto && this.mode !== 'wall') return;
     this.view.orientation = this.view.orientation === 'h' ? 'v' : 'h';
     if (this.pendingWall) {
       this.pendingWall = { ...this.pendingWall, o: this.pendingWall.o === 'h' ? 'v' : 'h' };
@@ -323,6 +339,14 @@ export class Match {
     sfx.click();
   }
 
+  // Куда смотрит указатель: на клетку для хода или на место для стены
+  _intent(t) {
+    const g = this.game;
+    if (t.cell && g.canMovePawn(t.cell.x, t.cell.y)) return 'move';
+    if (!this.auto) return this.mode;
+    return t.wall && g.wallsLeft[g.turn] > 0 ? 'wall' : null;
+  }
+
   _hover(t) {
     const canvas = this.view.canvas;
     if (!this.myTurn || !t) {
@@ -330,12 +354,14 @@ export class Match {
       if (!this.pendingWall) this.view.showGhost(null);
       return;
     }
-    if (this.mode === 'wall') {
-      if (this.pendingWall) return; // на сенсорных экранах ждём подтверждения
-      if (t.wall) this.view.showGhost(t.wall, this.game.canPlaceWall(t.wall.x, t.wall.y, t.wall.o));
-      else this.view.showGhost(null);
-      canvas.style.cursor = t.wall ? 'pointer' : 'default';
+    if (this.pendingWall) return; // на сенсорных экранах ждём подтверждения
+    const intent = this.auto ? this._intent(t) : this.mode;
+    if (intent === 'wall' && t.wall) {
+      const ok = this.game.canPlaceWall(t.wall.x, t.wall.y, t.wall.o);
+      this.view.showGhost(t.wall, ok);
+      canvas.style.cursor = ok ? 'pointer' : 'not-allowed';
     } else {
+      this.view.showGhost(null);
       const ok = t.cell && this.game.canMovePawn(t.cell.x, t.cell.y);
       canvas.style.cursor = ok ? 'pointer' : 'default';
     }
@@ -344,7 +370,18 @@ export class Match {
   _click(t, e) {
     if (!this.myTurn || !t) return;
     const g = this.game;
-    if (this.mode === 'move') {
+    if (this.auto) {
+      const intent = this._intent(t);
+      if (intent === 'move') {
+        this.pendingWall = null;
+        this._submit({ type: 'move', x: t.cell.x, y: t.cell.y });
+        return;
+      }
+      if (intent !== 'wall') {
+        if (t.cell) sfx.error();
+        return;
+      }
+    } else if (this.mode === 'move') {
       if (t.cell && g.canMovePawn(t.cell.x, t.cell.y)) {
         this._submit({ type: 'move', x: t.cell.x, y: t.cell.y });
       } else if (t.onGroove && g.wallsLeft[g.turn] > 0 && t.wall && g.canPlaceWall(t.wall.x, t.wall.y, t.wall.o)) {
@@ -426,9 +463,15 @@ export class Match {
     this._apply(move);
   }
 
-  async _apply(move, remaining) {
+  async _apply(move, clocks) {
     const g = this.game;
     const player = g.turn;
+    if (clocks) {
+      this.clocks = clocks.slice();
+      this.turnStart = Date.now();
+    } else {
+      this._charge(player);
+    }
     const jump = move.type === 'move' && Math.abs(move.x - g.pawns[player].x) + Math.abs(move.y - g.pawns[player].y) > 1;
     if (!g.play(move)) {
       sfx.error();
@@ -454,7 +497,7 @@ export class Match {
       else this._updateHud();
       return;
     }
-    this._beginTurn(remaining);
+    this._beginTurn();
   }
 
   _canUndo() {
@@ -540,7 +583,7 @@ export class Match {
     if (document.querySelector('.modal-wrap')) return;
     if (e.code === 'Space') {
       e.preventDefault();
-      this.setMode(this.mode === 'move' ? 'wall' : 'move');
+      if (!this.auto) this.setMode(this.mode === 'move' ? 'wall' : 'move');
     } else if (e.code === 'KeyR') this.rotateWall();
     else if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey)) this.undo();
     else if (e.code === 'KeyU') this.undo();
@@ -555,8 +598,7 @@ export class Match {
     net.on('action', (msg) => {
       clearTimeout(this._pendingTimer);
       this.busy = false;
-      if (msg.auto) toast(msg.by === this.cfg.you ? 'Время вышло — сделан автоматический ход' : 'У соперника вышло время');
-      this._apply(msg.move, msg.remaining);
+      this._apply(msg.move, msg.clocks);
     });
     net.on('reject', (msg) => {
       clearTimeout(this._pendingTimer);
@@ -568,6 +610,7 @@ export class Match {
     net.on('error', (msg) => toast(msg.msg, 'error'));
     net.on('over', (msg) => {
       // Дождаться окончания анимации последнего хода
+      if (msg.clocks) this.clocks = msg.clocks.slice();
       const wait = () => (this.busy ? setTimeout(wait, 100) : this._finish(msg.winner, msg.reason));
       wait();
     });
@@ -583,7 +626,7 @@ export class Match {
       this.destroyed = true;
       this.destroy();
       this.resultModal?.close();
-      this.onRestart({ ...this.cfg, you: msg.you, names: msg.names, moves: msg.moves, remaining: msg.remaining });
+      this.onRestart({ ...this.cfg, you: msg.you, names: msg.names, moves: msg.moves, clocks: msg.clocks });
     });
     net.on('disconnect', () => {
       if (!this.over) {
@@ -624,7 +667,7 @@ export class Match {
     } else if (mode === 'hotseat') {
       win = true;
       title = `Победил ${this.names[winner]}!`;
-      sub = reason === 'resign' ? 'Соперник сдался' : 'Фишка дошла до финиша';
+      sub = { resign: 'Соперник сдался', timeout: `У игрока «${this.names[1 - winner]}» закончилось время` }[reason] || 'Фишка дошла до финиша';
       reward = REWARDS.hotseat;
     } else {
       const me = mode === 'online' ? this.cfg.you : 0;
@@ -635,6 +678,7 @@ export class Match {
         resign: win ? 'Соперник сдался' : 'Вы сдались',
         left: 'Соперник покинул игру',
         disconnect: 'Соперник отключился',
+        timeout: win ? 'У соперника закончилось время' : 'У вас закончилось время',
       };
       sub = reasons[reason] || '';
       reward = win ? (mode === 'bot' ? REWARDS.bot[this.cfg.botLevel] : REWARDS.online) : REWARDS.lose;
@@ -652,14 +696,14 @@ export class Match {
       ? h('div', { class: 'reward' }, '+', h('span', { class: 'amount' }, String(reward)), coinIcon())
       : null;
     const buttons = [];
-    if (reward && platform.isYandex()) {
+    if (reward) {
       buttons.push({
         label: 'x2 за рекламу',
         icon: 'video',
         kind: 'gold',
         close: false,
         onClick: async () => {
-          const ok = await platform.showRewardedAd();
+          const ok = await watchRewarded();
           if (ok) {
             addCoins(reward);
             sfx.coin();
@@ -685,7 +729,7 @@ export class Match {
           this.destroyed = true;
           this.destroy();
           await platform.showFullscreenAd();
-          this.onRestart({ ...this.cfg, moves: [], remaining: undefined });
+          this.onRestart({ ...this.cfg, moves: [], clocks: undefined });
         },
       });
     }

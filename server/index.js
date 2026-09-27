@@ -80,7 +80,8 @@ class Room {
     this.players = [null, null]; // client; 0 — синий (ходит первым), 1 — красный
     this.game = null;
     this.timer = null;
-    this.deadline = 0;
+    this.clocks = [0, 0]; // остаток времени каждого игрока на всю партию, мс
+    this.turnStart = 0;
     this.rematch = [false, false];
     this.dropTimers = [null, null];
     rooms.set(this.code, this);
@@ -106,7 +107,9 @@ class Room {
     });
     this.game = new Game(this.size);
     this.rematch = [false, false];
-    this.resetClock();
+    this.clocks = [this.time * 1000, this.time * 1000];
+    this.turnStart = Date.now();
+    this.armClock();
     this.players.forEach((c, i) => send(c, { t: 'start', ...this.snapshot(i) }));
   }
 
@@ -119,29 +122,44 @@ class Room {
       names: this.players.map((c) => c?.name || 'Игрок'),
       moves: this.game.history.map(({ type, x, y, o }) => (type === 'wall' ? { type, x, y, o } : { type, x, y })),
       turn: this.game.turn,
-      remaining: Math.max(0, this.deadline - Date.now()),
+      clocks: this.currentClocks(),
     };
   }
 
-  resetClock() {
+  // Шахматные часы: время тикает только у того, чей ход
+  currentClocks() {
+    const c = this.clocks.slice();
+    if (this.game && this.game.winner === -1) c[this.game.turn] = Math.max(0, c[this.game.turn] - (Date.now() - this.turnStart));
+    return c;
+  }
+
+  armClock() {
     clearTimeout(this.timer);
     if (!this.game || this.game.winner !== -1) return;
-    this.deadline = Date.now() + this.time * 1000;
-    this.timer = setTimeout(() => this.onTimeout(), this.time * 1000 + 250);
+    const left = this.clocks[this.game.turn];
+    this.timer = setTimeout(() => this.onTimeout(), left + 250);
   }
 
   onTimeout() {
     if (!this.game || this.game.winner !== -1) return;
-    const mv = this.game.autoMove();
-    if (mv) this.apply(mv, true);
+    const loser = this.game.turn;
+    this.clocks[loser] = 0;
+    this.finish(1 - loser, 'timeout');
   }
 
-  apply(move, auto = false) {
+  apply(move) {
     const by = this.game.turn;
+    const spent = Date.now() - this.turnStart;
+    if (spent >= this.clocks[by]) {
+      this.onTimeout();
+      return true;
+    }
     if (!this.game.play(move)) return false;
-    this.resetClock();
-    const remaining = Math.max(0, this.deadline - Date.now());
-    this.players.forEach((c) => send(c, { t: 'action', move, by, auto, remaining }));
+    this.clocks[by] -= spent;
+    this.turnStart = Date.now();
+    this.armClock();
+    const clocks = this.currentClocks();
+    this.players.forEach((c) => send(c, { t: 'action', move, by, clocks }));
     if (this.game.winner !== -1) this.finish(this.game.winner, 'goal');
     return true;
   }
@@ -149,7 +167,7 @@ class Room {
   finish(winner, reason) {
     clearTimeout(this.timer);
     if (this.game && this.game.winner === -1) this.game.winner = winner;
-    this.players.forEach((c) => send(c, { t: 'over', winner, reason }));
+    this.players.forEach((c) => send(c, { t: 'over', winner, reason, clocks: this.clocks }));
   }
 
   leave(client, reason = 'left') {

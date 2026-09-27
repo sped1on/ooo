@@ -309,6 +309,18 @@ input {
   top: 0;
   right: 0;
   z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-ad {
+  padding: 10px 16px;
+  white-space: nowrap;
+}
+
+.shop-ad {
+  margin-left: auto;
 }
 
 .coins-pill {
@@ -397,7 +409,7 @@ input {
   display: flex;
   flex-direction: column;
   align-self: flex-start;
-  margin-top: 46px;
+  margin-top: 62px;
 }
 
 .choice-row {
@@ -529,7 +541,7 @@ input {
   padding: 22px;
   display: flex;
   flex-direction: column;
-  margin-top: 46px;
+  margin-top: 62px;
   min-width: 0;
 }
 
@@ -661,7 +673,7 @@ input {
   width: 280px;
   flex: none;
   padding: 20px;
-  margin-top: 46px;
+  margin-top: 62px;
   align-self: flex-start;
 }
 
@@ -709,7 +721,7 @@ input {
 .rules-panel {
   flex: 1;
   padding: 24px;
-  margin-top: 46px;
+  margin-top: 62px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -772,7 +784,7 @@ input {
 .example-panel {
   flex: 1.1;
   padding: 20px;
-  margin-top: 46px;
+  margin-top: 62px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -842,7 +854,7 @@ kbd {
 .settings-panel {
   flex: 1;
   padding: 24px;
-  margin-top: 46px;
+  margin-top: 62px;
   max-width: 640px;
   overflow: auto;
 }
@@ -1747,5 +1759,22 @@ input[type='range'] {
   .stage {
     height: 36vh;
     min-height: 220px;
+  }
+}
+
+@media (max-width: 900px), (max-height: 560px) and (max-width: 1100px) {
+  .btn-ad {
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+  .btn-ad .ic {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (max-width: 600px) {
+  .shop-panel .section-head {
+    flex-wrap: wrap;
   }
 }
