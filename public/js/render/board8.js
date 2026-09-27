@@ -278,14 +278,14 @@ export class Board8View extends BoardView {
     g.clear();
     g.add(buildBoard8Mesh(this.skins8.board8));
     const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(16, 16),
+      new THREE.PlaneGeometry(11.5, 11.5),
       new THREE.MeshBasicMaterial({ map: glowTexture(), color: '#000000', transparent: true, opacity: 0.85, depthWrite: false }),
     );
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = -0.32;
     g.add(shadow);
     this.underGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(20, 20),
+      new THREE.PlaneGeometry(14, 14),
       new THREE.MeshBasicMaterial({ map: glowTexture(), color: this.accent || '#2f5dff', transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }),
     );
     this.underGlow.rotation.x = -Math.PI / 2;

@@ -29,11 +29,14 @@ const TIMES = [
   { sec: 600, label: '10 мин', sub: 'Для опытных' },
 ];
 
+// Онлайн доступен, если сборка знает адрес сервера или игра запущена с нашего сервера
+const ONLINE = window.KORIDOR_ONLINE !== false;
+
 const MODES = [
   { id: 'bot', icon: 'robot', label: 'Против бота', sub: 'Тренируйся и улучшайся' },
-  { id: 'online', icon: 'globe', label: 'Онлайн', sub: 'Случайный игрок или друг' },
-  { id: 'friend', icon: 'users', label: 'С другом', sub: 'На одном экране или по ссылке' },
-];
+  ONLINE && { id: 'online', icon: 'globe', label: 'Онлайн', sub: 'Случайный игрок или друг' },
+  { id: 'friend', icon: 'users', label: 'С другом', sub: ONLINE ? 'На одном экране или по ссылке' : 'Вдвоём на одном устройстве' },
+].filter(Boolean);
 
 const SHOP_PAGE = 12;
 
@@ -164,6 +167,7 @@ function mountRulesPreview() {
 // ---------- Играть ----------
 
 function renderPlayPanel() {
+  if (!MODES.some((m) => m.id === state.prefs.mode)) state.prefs.mode = 'bot';
   const times = $('#time-choices');
   times.innerHTML = '';
   for (const t of TIMES) {
@@ -377,7 +381,7 @@ function setGame(game) {
 function renderGameSwitch() {
   const g = GAMES[currentGame()];
   $('.logo h1').textContent = g.title;
-  $('.logo h1').style.fontSize = g.title.length > 7 ? '36px' : '';
+  $('.logo h1').style.fontSize = g.title.length > 7 ? '31px' : '';
   $('.logo p').textContent = g.sub;
   document.title = `${GAME_TITLES[currentGame()] || 'Коридор'} — настольная игра`;
   const box = $('#game-switch');
@@ -425,6 +429,10 @@ function openSizeModal() {
 // ---------- Режим «С другом» ----------
 
 function openFriendModal() {
+  if (!ONLINE) {
+    startMatch({ mode: 'hotseat' });
+    return;
+  }
   const body = h(
     'div',
     { class: 'option-list' },

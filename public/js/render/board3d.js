@@ -585,14 +585,14 @@ export class BoardView {
 
     // Мягкая тень и цветное свечение под доской — доска «стоит» в сцене
     const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(n * 1.9, n * 1.9),
+      new THREE.PlaneGeometry(n * 1.35, n * 1.35),
       new THREE.MeshBasicMaterial({ map: glowTexture(), color: '#000000', transparent: true, opacity: 0.85, depthWrite: false }),
     );
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = -0.52;
     g.add(shadow);
     this.underGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(n * 2.4, n * 2.4),
+      new THREE.PlaneGeometry(n * 1.7, n * 1.7),
       new THREE.MeshBasicMaterial({ map: glowTexture(), color: this.accent || '#2f5dff', transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
     );
     this.underGlow.rotation.x = -Math.PI / 2;

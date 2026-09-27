@@ -33,7 +33,8 @@ const js = result.outputFiles[0].text;
 const css = fs.readFileSync(path.join(pub, 'css', 'style.css'), 'utf8');
 const favicon = fs.readFileSync(path.join(pub, 'favicon.svg'), 'utf8');
 
-const serverCfg = process.env.ONLINE_URL ? `<script>window.KORIDOR_SERVER=${JSON.stringify(process.env.ONLINE_URL)};</script>` : '';
+// Без адреса сервера онлайн-режимы в сборке скрываются (иначе они не работают)
+const serverCfg = process.env.ONLINE_URL ? `<script>window.KORIDOR_SERVER=${JSON.stringify(process.env.ONLINE_URL)};</script>` : '<script>window.KORIDOR_ONLINE=false;</script>';
 
 let html = fs.readFileSync(path.join(pub, 'index.html'), 'utf8');
 html = html.replace(/<!-- importmap-start -->[\s\S]*?<!-- importmap-end -->/, serverCfg);
