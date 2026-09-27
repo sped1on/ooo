@@ -41,4 +41,14 @@ try {
 } catch {
   console.log('Утилита zip не найдена — заархивируйте содержимое dist/yandex вручную');
 }
+// Версия одной страницей (для просмотра по ссылке, без SDK Яндекса)
+let css = fs.readFileSync(path.join(root, 'css', 'style.css'), 'utf8');
+css = css.replace(/url\('\.\.\/assets\/fonts\/([^']+)'\)/g, (m, f) => `url(data:font/woff2;base64,${fs.readFileSync(path.join(root, 'assets', 'fonts', f)).toString('base64')})`);
+const js = fs.readFileSync(path.join(out, 'game.js'), 'utf8').replace(/<\/script/gi, '<\\/script');
+const body = html.slice(html.indexOf('<body>') + 6, html.lastIndexOf('</body>')).replace(/<script type="module" src="game.js"><\/script>/, '');
+fs.writeFileSync(
+  path.join(dist, 'zombie-road-artifact.html'),
+  `<title>Дорога Зомби</title>\n<style>:root{color-scheme:dark}\n${css}</style>\n${body}\n<script>window.ZROAD_NO_SDK=true;</script>\n<script type="module">${js}</script>\n`,
+);
+console.log(`dist/zombie-road-artifact.html — ${Math.round(fs.statSync(path.join(dist, 'zombie-road-artifact.html')).size / 1024)} КБ`);
 console.log(`dist/yandex/game.js — ${Math.round(fs.statSync(path.join(out, 'game.js')).size / 1024)} КБ`);
