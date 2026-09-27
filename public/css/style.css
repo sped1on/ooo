@@ -2167,3 +2167,137 @@ input[type='range'] {
     font-size: 14px;
   }
 }
+
+/* ---------- Компактные карточки ---------- */
+
+.shop-grid {
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  grid-auto-rows: auto;
+  align-content: start;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.skin-card .thumb {
+  flex: none;
+  aspect-ratio: 9 / 7;
+  height: auto;
+}
+
+.skin-card .meta {
+  padding: 5px 8px 6px;
+}
+
+.skin-card .name {
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skin-card .price {
+  font-size: 14px;
+}
+
+.color-card .flip {
+  top: 40%;
+  width: 28px;
+  height: 28px;
+  font-size: 20px;
+}
+
+.choice {
+  padding: 9px 6px;
+}
+
+.choice.selected {
+  padding: 8px 5px;
+}
+
+.modes .choice {
+  padding: 10px 6px;
+}
+
+.choice-row {
+  margin-bottom: 18px;
+}
+
+.btn.huge {
+  padding: 13px;
+  font-size: 20px;
+}
+
+/* ---------- Рулетка ---------- */
+
+.btn-wheel {
+  position: relative;
+  padding: 10px 14px;
+}
+
+.btn-wheel.has-free::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff3d5a;
+  box-shadow: 0 0 8px #ff3d5a;
+}
+
+.modal.roulette {
+  width: min(420px, 100%);
+}
+
+.wheel-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.wheel-box {
+  position: relative;
+  width: min(320px, 78vw);
+  aspect-ratio: 1;
+}
+
+.wheel {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5));
+}
+
+.wheel-pointer {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-top: 26px solid #ffd35a;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+}
+
+.wheel-info {
+  text-align: center;
+  color: var(--muted);
+  margin: 0;
+  font-size: 14px;
+}
+
+@media (max-width: 900px), (max-height: 560px) and (max-width: 1100px) {
+  .btn-wheel span:last-child {
+    display: none;
+  }
+  .btn-wheel {
+    padding: 7px 10px;
+  }
+  .shop-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    grid-auto-rows: auto;
+  }
+}

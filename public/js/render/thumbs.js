@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { createRenderer, environmentFor, createPawnMesh, createWallMesh, buildBoardMesh } from './board3d.js';
 import { genTexture } from './textures.js';
+import { buildBoard8Mesh, createPieceMesh } from './board8.js';
 import { findSkin, PLAYER_COLORS } from '../data/skins.js';
 
 const W = 360;
@@ -140,13 +141,53 @@ function backgroundThumb(skin) {
   return c.toDataURL('image/png');
 }
 
+// Фишка крупным планом — чтобы скин было хорошо видно
 function pawnThumb(skin) {
   const g = new THREE.Group();
   g.add(floorShadow());
   const p = createPawnMesh(skin.id, 0);
-  p.scale.setScalar(2.1);
+  p.userData.glow.visible = false;
+  p.scale.setScalar(1.75);
   g.add(p);
-  return shoot(g, [0, 1.75, 3.6], [0, 0.75, 0]);
+  return shoot(g, [0, 1.75, 4.1], [0, 0.95, 0]);
+}
+
+// Шахматные фигуры: белые и чёрные король, ферзь и конь
+function chessPiecesThumb(skin) {
+  const g = new THREE.Group();
+  g.add(floorShadow());
+  const set = [['k', 0, -0.55, 0.1], ['n', 0, -1.3, 0.55], ['q', 1, 0.55, -0.1], ['n', 1, 1.3, 0.35]];
+  for (const [type, color, x, z] of set) {
+    const m = createPieceMesh('chess', skin.id, type, color);
+    m.scale.setScalar(1.6);
+    m.position.set(x, 0, z);
+    g.add(m);
+  }
+  return shoot(g, [0, 2.9, 5.6], [0, 0.7, 0]);
+}
+
+function checkersPiecesThumb(skin) {
+  const g = new THREE.Group();
+  g.add(floorShadow());
+  const set = [['man', 0, -0.9, 0.3], ['king', 0, -0.2, -0.4], ['man', 1, 0.9, 0.3], ['king', 1, 0.5, -0.5]];
+  for (const [type, color, x, z] of set) {
+    const m = createPieceMesh('checkers', skin.id, type, color);
+    m.scale.setScalar(1.5);
+    m.position.set(x, 0, z);
+    g.add(m);
+  }
+  return shoot(g, [0, 3.1, 3.9], [0, 0.1, 0]);
+}
+
+function board8Thumb(skin) {
+  const g = buildBoard8Mesh(skin.id, { size: 512, labels: false });
+  const pieces = [[3, 3, 0], [4, 4, 1], [2, 5, 1], [5, 2, 0]];
+  for (const [r, c, color] of pieces) {
+    const m = createPieceMesh('checkers', 'c-classic', 'man', color);
+    m.position.set(c - 3.5, 0.14, r - 3.5);
+    g.add(m);
+  }
+  return shoot(g, [0, 11, 8.2], [0, -0.6, 0.3]);
 }
 
 // Мини-доска 5×5 со скинами (для поля и наборов)
@@ -181,6 +222,9 @@ export function skinThumb(kind, skin) {
   else if (kind === 'finish') url = finishThumb(skin);
   else if (kind === 'background') url = backgroundThumb(skin);
   else if (kind === 'pawns') url = pawnThumb(skin);
+  else if (kind === 'chessPieces') url = chessPiecesThumb(skin);
+  else if (kind === 'checkersPieces') url = checkersPiecesThumb(skin);
+  else if (kind === 'board8') url = board8Thumb(skin);
   else url = boardThumb({ field: skin.id });
   cache.set(key, url);
   return url;

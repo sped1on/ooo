@@ -6,7 +6,7 @@ import { BoardView } from './render/board3d.js';
 import { skinThumb, setThumb, hasThumb } from './render/thumbs.js';
 import { applyBackground } from './render/backdrop.js';
 import { SKIN_KINDS, SETS, GAME_SKIN_KINDS, findSkin, setPrice } from './data/skins.js';
-import { state, save, subscribe, isOwned, buy, buySet, equipSet, equip, claimBonus, resetProgress, applyCloudSave, addCoins, playerName } from './state/store.js';
+import { state, save, subscribe, isOwned, buy, buySet, equipSet, equip, resetProgress, applyCloudSave, addCoins, playerName } from './state/store.js';
 import { $, $$, h, icon, coinIcon, modal, toast } from './ui/dom.js';
 import { icons } from './ui/icons.js';
 import { sfx, setPaused } from './audio.js';
@@ -17,6 +17,7 @@ import { LessonRun, lessonProgress } from './ui/lesson.js';
 import { TRACKS, MAX_LEVEL } from './core/lessons.js';
 import { OnlineClient, inviteLink } from './net/online.js';
 import { watchRewarded, AD_REWARD } from './ui/ads.js';
+import { openRoulette, freeSpinAvailable } from './ui/roulette.js';
 import * as platform from './platform/yandex.js';
 
 const TIMES = [
@@ -32,7 +33,7 @@ const MODES = [
   { id: 'friend', icon: 'users', label: 'С другом', sub: 'На одном экране или по ссылке' },
 ];
 
-const SHOP_PAGE = 8;
+const SHOP_PAGE = 12;
 
 let view = null; // 3D-вид Коридора, переезжает между экранами
 let view8 = null; // 3D-вид шахмат и шашек
@@ -645,29 +646,23 @@ async function watchAdForCoins() {
 
 function onPlus() {
   sfx.click();
-  const buttons = [
-    { label: `Реклама +${AD_REWARD}`, icon: 'video', kind: 'gold', onClick: watchAdForCoins },
-  ];
-  if (!platform.isYandex()) {
-    buttons.unshift({
-      label: 'Бонус дня +100',
-      kind: 'ghost',
-      onClick: () => {
-        const r = claimBonus();
-        if (r.ok) {
-          sfx.coin();
-          toast(`Ежедневный бонус: +${r.amount} монет!`, 'success');
-        } else {
-          toast(`Следующий бонус через ${Math.ceil(r.left / 3_600_000)} ч.`);
-        }
-      },
-    });
-  }
-  modal({
-    title: 'Получить монеты',
-    body: h('p', {}, `Посмотрите короткую рекламу и получите ${AD_REWARD} монет. Монеты также начисляются за победы.`),
-    buttons,
+  openWheel();
+}
+
+function openWheel() {
+  openRoulette({
+    preferKinds: GAME_SKIN_KINDS[currentGame()],
+    thumb: (kind, skin) => skinThumb(kind, skin),
+    onSkin: (kind, id) => {
+      equip(kind, id);
+      applyEquipped();
+      if (currentView === 'shop') renderShop();
+    },
   });
+}
+
+function renderWheelBadge() {
+  $('#btn-wheel').classList.toggle('has-free', freeSpinAvailable());
 }
 
 // ---------- Магазин ----------
@@ -682,7 +677,7 @@ const colorIdx = {};
 const thumbQueue = [];
 let thumbBusy = false;
 function thumbImg(kind, skin, cls = '') {
-  const img = h('img', { alt: '', draggable: 'false', class: `thumb ${cls}` });
+  const img = h('img', { alt: '', draggable: 'false', class: `thumb ${cls}`, src: 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==' });
   const make = () => (kind === 'sets' ? setThumb(skin) : skinThumb(kind, skin));
   if (kind !== 'sets' && hasThumb(kind, skin.id)) img.src = make();
   else {
@@ -725,6 +720,7 @@ function renderShop() {
   const tabs = $('#shop-tabs');
   tabs.innerHTML = '';
   if (!currentShopKinds().includes(shopKind)) shopKind = currentShopKinds()[0];
+  $('.shop-panel .section-head p').textContent = currentGame() === 'koridor' ? 'Скины для поля, стен, фишек, финиша и фона' : `Скины для доски, ${currentGame() === 'chess' ? 'фигур' : 'шашек'} и фона`;
   for (const kind of currentShopKinds()) {
     const title = kind === 'sets' ? 'Наборы' : SKIN_KINDS[kind].title;
     tabs.append(
@@ -1127,6 +1123,7 @@ async function boot() {
 
   subscribe(() => {
     renderCoins();
+    renderWheelBadge();
     if (currentView === 'settings') renderStats();
   });
 
@@ -1143,6 +1140,11 @@ async function boot() {
     setView('shop');
   });
   $('#btn-plus').addEventListener('click', onPlus);
+  $('#btn-wheel').addEventListener('click', () => {
+    sfx.click();
+    openWheel();
+  });
+  renderWheelBadge();
   $$('.btn-ad').forEach((b) => b.addEventListener('click', watchAdForCoins));
 
   renderAll();
