@@ -34,6 +34,7 @@ export function menuScreen(app) {
   const btn = (ic, text, fn, cls = '', dot = false) => h('button', { class: `nav-btn ${cls}`, onclick: () => (sfx.click(), fn()) }, h('span', { html: icon(ic) }), text, dot ? h('i', { class: 'dot' }) : null);
   nav.append(
     btn('play', 'Играть', () => app.play(), 'play'),
+    btn('trophy', 'Аркада', () => app.go('arcade'), 'arcade'),
     btn('car', 'Гараж', () => app.go('garage')),
     btn('cart', 'Магазин', () => app.go('shop')),
     btn('vest', 'Снаряжение', () => app.go('gear')),

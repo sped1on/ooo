@@ -591,13 +591,101 @@ export function waterTower() {
   });
 }
 
-export function flagPole(col = '#b8261e') {
-  return cached(`flag${col}`, () => {
+export function flagPole(col = '#b8261e', cloth = true) {
+  return cached(`flag${col}${cloth}`, () => {
     const b = new GeoBuilder();
     b.cyl(0.06, 0.08, 9, 6, '#9a9ea4', { y: 4.5 });
-    b.box(1.8, 1.1, 0.03, col, { x: 0.95, y: 8.2 });
+    b.ico(0.12, 0, '#c8a018', { y: 9.05 });
+    if (cloth) b.box(1.8, 1.1, 0.03, col, { x: 0.95, y: 8.2 });
     return b;
   });
+}
+
+// Флаг базы с эмблемой, развевается на ветру
+export class Flag {
+  constructor(color, baseNum, label = '') {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 160;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, 256, 160);
+    // полосы по краю
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, 0, 256, 10);
+    ctx.fillRect(0, 150, 256, 10);
+    // эмблема: щит, скрещённые ключи и номер базы
+    ctx.translate(128, 80);
+    ctx.fillStyle = '#f2c21b';
+    ctx.beginPath();
+    ctx.moveTo(-44, -52);
+    ctx.lineTo(44, -52);
+    ctx.lineTo(44, 6);
+    ctx.quadraticCurveTo(44, 44, 0, 62);
+    ctx.quadraticCurveTo(-44, 44, -44, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.moveTo(-36, -44);
+    ctx.lineTo(36, -44);
+    ctx.lineTo(36, 4);
+    ctx.quadraticCurveTo(36, 36, 0, 52);
+    ctx.quadraticCurveTo(-36, 36, -36, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#c8ccd2';
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    for (const sx of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(-26 * sx, -30);
+      ctx.lineTo(24 * sx, 30);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(-26 * sx, -30, 8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#f2c21b';
+    ctx.font = '700 40px Oswald, Arial Narrow, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineWidth = 6;
+    ctx.strokeText(String(baseNum), 0, 4);
+    ctx.fillText(String(baseNum), 0, 4);
+    if (label) {
+      ctx.font = '700 16px Oswald, sans-serif';
+      ctx.fillStyle = '#f2f2f2';
+      ctx.fillText(label, 0, 72);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const geo = new THREE.PlaneGeometry(1.8, 1.1, 14, 6);
+    geo.translate(0.9, 0, 0);
+    this.base = geo.attributes.position.array.slice();
+    this.mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
+    this.mesh.castShadow = true;
+    this.t = Math.random() * 10;
+    this.frame = 0;
+  }
+
+  update(dt) {
+    this.t += dt;
+    // обновляем через кадр — флаг не должен отнимать производительность
+    if ((this.frame++ & 1) === 1) return;
+    const p = this.mesh.geometry.attributes.position;
+    const a = p.array;
+    const b = this.base;
+    for (let i = 0; i < a.length; i += 3) {
+      const x = b[i];
+      const k = x / 1.8;
+      a[i + 2] = Math.sin(x * 3.2 - this.t * 6) * 0.14 * k + Math.sin(b[i + 1] * 2 + this.t * 3.1) * 0.04 * k;
+      a[i + 1] = b[i + 1] - k * k * 0.08;
+    }
+    p.needsUpdate = true;
+    this.mesh.geometry.computeVertexNormals();
+  }
 }
 
 // ------------------------------ опасности ------------------------------
@@ -652,8 +740,11 @@ export const STATION = {
   carSpot: V(16, 0, -9),
 };
 
-export function gasStation() {
-  return cached('station', () => {
+export const BRANDS = ['#c0261c', '#1f5fb8', '#2a9a4a', '#e0a01a'];
+
+export function gasStation(brand = 0) {
+  const bc = BRANDS[brand % BRANDS.length];
+  return cached(`station${brand}`, () => {
     const b = new GeoBuilder();
     // площадка
     b.box(26, 0.12, 44, '#a8a6a0', { x: 20, y: 0.06 }, MC);
@@ -662,12 +753,12 @@ export function gasStation() {
     // опоры навеса (сам навес — отдельной моделью, его делаем прозрачным, когда игрок под ним)
     for (const x of [11, 21]) for (const z of [-7, 7]) {
       b.box(0.45, 5.2, 0.45, '#d8d4cc', { x, y: 2.6, z }, MC);
-      b.box(0.5, 0.6, 0.5, '#c0261c', { x, y: 0.3, z });
+      b.box(0.5, 0.6, 0.5, bc, { x, y: 0.3, z });
     }
     // колонки
     for (const p of STATION.pumps) {
       b.box(1.6, 0.25, 3.4, '#b8b4ac', { x: p.x, y: 0.2, z: p.z }, MC);
-      b.box(0.8, 1.8, 0.6, '#c0261c', { x: p.x, y: 1.2, z: p.z });
+      b.box(0.8, 1.8, 0.6, bc, { x: p.x, y: 1.2, z: p.z });
       b.box(0.82, 0.5, 0.62, '#e8e4dc', { x: p.x, y: 1.9, z: p.z });
       b.box(0.5, 0.3, 0.64, '#1a1e22', { x: p.x, y: 1.55, z: p.z });
       b.box(0.3, 0.1, 0.66, '#3aa04a', { x: p.x, y: 1.28, z: p.z });
@@ -680,7 +771,7 @@ export function gasStation() {
     b.box(8, 1.0, 14, '#a86a4e', { x: 30, y: 0.5 }, MB);
     b.box(8, 2.6, 14, '#d8cfb8', { x: 30, y: 2.3 }, MC);
     b.box(8.4, 0.4, 14.4, '#7a2a22', { x: 30, y: 3.8 });
-    b.box(0.3, 1.2, 14.6, '#c0261c', { x: 25.8, y: 4.4 });
+    b.box(0.3, 1.2, 14.6, bc, { x: 25.8, y: 4.4 });
     b.box(0.32, 0.25, 14.6, '#e8e4dc', { x: 25.8, y: 4.4 });
     for (let i = 0; i < 4; i++) win(b, 25.95, 2.0, -5.2 + i * 2.2, 1.8, 1.5, { ry: -Math.PI / 2, frame: '#5a5e64', broken: i === 2 });
     door(b, 25.95, 0.05, 5.5, 1.3, 2.3, '#3a4a5a', -Math.PI / 2);
@@ -689,7 +780,7 @@ export function gasStation() {
     b.box(0.5, 0.8, 0.5, '#2a2c30', { x: 25.4, y: 0.4, z: 4.2 });
     // стела
     b.box(0.4, 7, 0.4, '#8a8e94', { x: 8, y: 3.5, z: -18 }, MM);
-    b.box(0.5, 2.6, 2.2, '#c0261c', { x: 8, y: 7.2, z: -18 });
+    b.box(0.5, 2.6, 2.2, bc, { x: 8, y: 7.2, z: -18 });
     b.box(0.55, 1.6, 1.6, '#e8e4dc', { x: 8, y: 7.2, z: -18 });
     b.box(0.6, 0.9, 0.7, '#1a1a1a', { x: 8, y: 7.2, z: -18.1 });
     for (let i = 0; i < 3; i++) b.box(0.6, 0.3, 1.8, i === 0 ? '#3aa04a' : '#2a2c30', { x: 8, y: 5.6 - i * 0.4, z: -18 });
@@ -702,11 +793,12 @@ export function gasStation() {
   });
 }
 
-export function gasCanopy() {
-  return cached('canopy', () => {
+export function gasCanopy(brand = 0) {
+  const bc = BRANDS[brand % BRANDS.length];
+  return cached(`canopy${brand}`, () => {
     const b = new GeoBuilder();
     b.box(13, 0.7, 20, '#e8e4dc', { x: 16, y: 5.6 });
-    b.box(13.1, 0.25, 20.1, '#c0261c', { x: 16, y: 5.45 });
+    b.box(13.1, 0.25, 20.1, bc, { x: 16, y: 5.45 });
     b.box(12.6, 0.1, 19.6, '#c8c4bc', { x: 16, y: 5.2 });
     return b;
   });
@@ -782,8 +874,9 @@ export const BASE = {
   size: [46, 50],
 };
 
-export function baseModel(col = '#2f5f9e') {
-  return cached(`base${col}`, () => {
+// Варианты баз: 0 — листовой металл, 1 — частокол из брёвен, 2 — бетонные блоки, 3 — военная (хаки)
+export function baseModel(col = '#2f5f9e', v = 0) {
+  return cached(`base${col}${v}`, () => {
     const b = new GeoBuilder();
     const [W, D] = BASE.size;
     const hw = W / 2;
@@ -794,18 +887,52 @@ export function baseModel(col = '#2f5f9e') {
       const len = Math.hypot(x1 - x0, z1 - z0);
       const n = Math.max(1, Math.round(len / 2));
       const ry = Math.atan2(x1 - x0, z1 - z0) + Math.PI / 2;
-      for (let i = 0; i < n; i++) {
-        const t = (i + 0.5) / n;
-        const x = x0 + (x1 - x0) * t;
-        const z = z0 + (z1 - z0) * t;
-        const hh = r.f(2.7, 3.1);
-        b.box(len / n - 0.02, hh, 0.1, r.pick(['#b8b4ae', '#c89a6a', '#8aa0b4', '#b87a5a', '#a8b0a0']), { x, y: hh / 2 + 0.05, z, ry }, MM);
+      if (v === 1) {
+        // частокол: брёвна с заострёнными верхушками
+        const nl = Math.max(2, Math.round(len / 0.34));
+        for (let i = 0; i < nl; i++) {
+          const t = (i + 0.5) / nl;
+          const hh = r.f(3.0, 3.5);
+          const col2 = r.pick(['#7a5a3a', '#6a4e32', '#806040']);
+          b.cyl(0.17, 0.17, hh, 7, col2, { x: x0 + (x1 - x0) * t, y: hh / 2, z: z0 + (z1 - z0) * t }, MW);
+          b.cone(0.17, 0.4, 7, col2, { x: x0 + (x1 - x0) * t, y: hh + 0.2, z: z0 + (z1 - z0) * t });
+        }
+      } else if (v === 2) {
+        // бетонные блоки с полосой
+        const nb = Math.max(1, Math.round(len / 2.4));
+        for (let i = 0; i < nb; i++) {
+          const t = (i + 0.5) / nb;
+          const x = x0 + (x1 - x0) * t;
+          const z = z0 + (z1 - z0) * t;
+          b.box(len / nb - 0.08, 2.9, 0.5, r.pick(['#a8a6a0', '#9a9892', '#b4b0a8']), { x, y: 1.45, z, ry }, MC);
+          b.box(len / nb - 0.08, 0.22, 0.52, '#d8b020', { x, y: 2.3, z, ry });
+        }
+      } else {
+        const pal = v === 3 ? ['#5f6a44', '#56603c', '#6a7450', '#4f5a38'] : ['#b8b4ae', '#c89a6a', '#8aa0b4', '#b87a5a', '#a8b0a0'];
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) / n;
+          const x = x0 + (x1 - x0) * t;
+          const z = z0 + (z1 - z0) * t;
+          const hh = r.f(2.7, 3.1);
+          b.box(len / n - 0.04, hh, 0.06, r.pick(pal), { x, y: hh / 2 + 0.05, z, ry }, MM);
+        }
       }
-      b.plank(V(x0, 2.6, z0), V(x1, 2.6, z1), 0.1, 0.12, '#5a4632', MW);
-      b.plank(V(x0, 0.9, z0), V(x1, 0.9, z1), 0.1, 0.12, '#5a4632', MW);
-      for (let i = 0; i <= n; i++) {
-        const t = i / n;
-        b.box(0.2, 3.4, 0.2, '#5a4632', { x: x0 + (x1 - x0) * t, y: 1.7, z: z0 + (z1 - z0) * t }, MW);
+      // рейки — с внутренней стороны, отдельно от листов (иначе грани совпадают и мерцают)
+      let nx = -(z1 - z0) / len;
+      let nz = (x1 - x0) / len;
+      const mx = (x0 + x1) / 2;
+      const mz = (z0 + z1) / 2;
+      if (nx * (0 - mx) + nz * (-D / 2 - mz) < 0) {
+        nx = -nx;
+        nz = -nz;
+      }
+      const o = v === 2 ? 0.4 : v === 1 ? 0.3 : 0.13;
+      if (v !== 2) for (const ry2 of [2.6, 0.9]) b.plank(V(x0 + nx * o, ry2, z0 + nz * o), V(x1 + nx * o, ry2, z1 + nz * o), 0.1, 0.12, '#5a4632', MW);
+      if (v === 0 || v === 3) {
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          b.box(0.18, 3.4, 0.18, '#5a4632', { x: x0 + (x1 - x0) * t + nx * 0.15, y: 1.7, z: z0 + (z1 - z0) * t + nz * 0.15 }, MW);
+        }
       }
       // колючая проволока
       b.plank(V(x0, 3.25, z0), V(x1, 3.25, z1), 0.02, 0.02, '#6a6e74');
@@ -832,7 +959,7 @@ export function baseModel(col = '#2f5f9e') {
     const GD = 14;
     const GH = 6;
     const zc = gz - GD / 2;
-    const wc = '#b8805e';
+    const wc = ['#b8805e', '#9a9690', '#8a8e84', '#7a705e'][v] || '#b8805e';
     b.box(GW - 0.6, 0.1, GD - 0.4, '#9a968e', { y: 0.05, z: zc }, MC);
     b.box(GW, GH, 0.3, wc, { y: GH / 2, z: gz - GD + 0.15 }, MB);
     for (const sx of [-1, 1]) b.box(0.3, GH, GD, wc, { x: sx * (GW / 2 - 0.15), y: GH / 2, z: zc }, MB);
@@ -886,7 +1013,7 @@ export function baseModel(col = '#2f5f9e') {
     for (const z of [zc - 3, zc + 2]) b.box(2.4, 0.12, 0.3, '#fff4dc', { y: GH - 0.35, z }, { mat: 'glow' });
 
     // флаг, контейнеры, палатки, водонапорка, мелочи
-    b.merge(flagPole(col), { x: -8, z: -8 });
+    b.merge(flagPole(col, false), { x: -8, z: -8 });
     b.merge(container(0), { x: -17, z: -12, ry: 0.05 });
     b.merge(container(1), { x: -17, z: -20, ry: -0.05 });
     b.merge(container(2), { x: 16.5, z: -38 });
@@ -919,6 +1046,96 @@ export function gateDoor() {
     for (let i = 0; i < 4; i++) b.box(w - 0.1, 0.12, 0.2, '#3a3e44', { x: w / 2, y: 0.5 + i * 0.9 });
     b.plank(V(0.1, 0.4, 0), V(w - 0.1, 3.2, 0), 0.14, 0.2, '#3a3e44');
     b.box(0.2, 3.6, 0.24, '#2a2c30', { x: 0.1, y: 1.8 });
+    return b;
+  });
+}
+
+// ------------------------------ фонари и дорожные знаки ------------------------------
+
+// Уличный фонарь: консоль смотрит вдоль локальной +X (к дороге)
+export function streetLamp() {
+  return cached('streetLamp', () => {
+    const b = new GeoBuilder();
+    b.cyl(0.2, 0.26, 0.6, 8, '#3a3e44', { y: 0.3 }, MC);
+    b.cyl(0.08, 0.13, 7.4, 8, '#4a4e54', { y: 3.8 }, MM);
+    b.beam(V(0, 7.3, 0), V(1.2, 7.75, 0), 0.055, '#4a4e54');
+    b.beam(V(1.1, 7.75, 0), V(2.3, 7.75, 0), 0.05, '#4a4e54');
+    b.beam(V(0, 6.6, 0), V(0.9, 7.55, 0), 0.035, '#4a4e54');
+    b.box(0.95, 0.16, 0.42, '#2a2c30', { x: 2.55, y: 7.72 });
+    b.box(0.8, 0.05, 0.32, '#ffe2a0', { x: 2.55, y: 7.62 }, { mat: 'glow' });
+    b.box(0.3, 0.45, 0.2, '#3a3e44', { x: 0, y: 2.4, z: 0.12 });
+    return b;
+  });
+}
+
+// Бетонный отбойник со светоотражающими полосами (нос островка развилки)
+export function gore() {
+  return cached('gore', () => {
+    const b = new GeoBuilder();
+    for (let i = 0; i < 5; i++) {
+      const c = i % 2 ? '#1a1a1a' : '#f2c21b';
+      b.box(0.5, 0.9, 0.5, c, { x: (i - 2) * 0.55, y: 0.45 });
+    }
+    b.box(3.0, 0.1, 0.55, '#d8d4cc', { y: 0.95 }, MC);
+    for (const x of [-2.3, 2.3]) {
+      b.cone(0.28, 0.75, 10, '#e8601a', { x, y: 0.38 });
+      b.cyl(0.21, 0.24, 0.1, 10, '#f2f2f2', { x, y: 0.42 });
+    }
+    return b;
+  });
+}
+
+// Трамплин, повторяющий уклон дороги: heights[i] — высота над точкой дороги
+export function rampModel(len, width, heights, roadDy) {
+  const b = new GeoBuilder();
+  const n = heights.length - 1;
+  const hw = width / 2;
+  for (let i = 0; i < n; i++) {
+    const z0 = (len * i) / n;
+    const z1 = (len * (i + 1)) / n;
+    const y0 = roadDy[i] + heights[i];
+    const y1 = roadDy[i + 1] + heights[i + 1];
+    // настил из досок и металлические края
+    b.plank(V(0, y0 + 0.02, z0), V(0, y1 + 0.02, z1), width, 0.1, i % 2 ? '#8a6a44' : '#7a5c3a', MP);
+    for (const sx of [-1, 1]) {
+      b.plank(V(sx * (hw + 0.08), y0 + 0.1, z0), V(sx * (hw + 0.08), y1 + 0.1, z1), 0.16, 0.26, '#5a5e64', MM);
+      const hh = Math.max(0.05, (y0 + y1) / 2 - Math.min(roadDy[i], roadDy[i + 1]));
+      b.box(0.14, hh, (z1 - z0) * 0.98, '#4a4e54', { x: sx * (hw + 0.08), y: (y0 + y1) / 2 - hh / 2, z: (z0 + z1) / 2 }, MM);
+    }
+  }
+  // жёлто-чёрная кромка трамплина
+  const yt = roadDy[n] + heights[n];
+  for (let k = 0; k < 10; k++) b.box(width / 10, 0.12, 0.3, k % 2 ? '#1a1a1a' : '#f2c21b', { x: -hw + width / 20 + (k * width) / 10, y: yt + 0.02, z: len - 0.15 });
+  // опоры под кромкой
+  for (const x of [-hw + 0.4, -hw / 3, hw / 3, hw - 0.4]) b.box(0.22, heights[n] + 0.1, 0.22, '#4a4e54', { x, y: roadDy[n] + heights[n] / 2, z: len - 0.3 }, MM);
+  b.box(width, heights[n], 0.1, '#3a3e44', { y: roadDy[n] + heights[n] / 2, z: len - 0.05 }, MM);
+  return b;
+}
+
+// Две стойки под большой щит (щит — отдельной плоскостью с картинкой)
+export function signPosts(w = 4.4, y = 3.3) {
+  return cached(`posts${w}${y}`, () => {
+    const b = new GeoBuilder();
+    for (const sx of [-1, 1]) {
+      b.cyl(0.08, 0.09, y + 1.1, 8, '#8a8e94', { x: sx * (w / 2 - 0.4), y: (y + 1.1) / 2 }, MM);
+      b.cyl(0.18, 0.2, 0.3, 8, '#9a9892', { x: sx * (w / 2 - 0.4), y: 0.15 }, MC);
+    }
+    b.box(w + 0.1, 2.25, 0.08, '#5a5e64', { y, z: 0 }, MM);
+    for (const yy of [y - 0.6, y + 0.6]) b.box(w - 0.4, 0.08, 0.08, '#6a6e74', { y: yy, z: 0.08 });
+    return b;
+  });
+}
+
+// Щит-шеврон на краю островка
+export function chevron() {
+  return cached('chevron', () => {
+    const b = new GeoBuilder();
+    b.cyl(0.05, 0.05, 1.3, 6, '#8a8e94', { y: 0.65 });
+    b.box(0.9, 0.55, 0.04, '#f2c21b', { y: 1.2 });
+    for (const dx of [-0.22, 0.1]) {
+      b.box(0.1, 0.34, 0.05, '#1a1a1a', { x: dx, y: 1.28, rz: 0.6 });
+      b.box(0.1, 0.34, 0.05, '#1a1a1a', { x: dx, y: 1.12, rz: -0.6 });
+    }
     return b;
   });
 }

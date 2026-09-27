@@ -6,22 +6,24 @@ import { thumbImg } from './thumbs.js';
 import { S, store, give, gunStats, canAfford } from '../state/save.js';
 import { CARS, PARTS, ITEMS, GUNS, GUN_CATS, GUN_UPGRADES, GUN_MAX, ARMOR, MEDKITS, RARITY, CAR_MAX, CAR_WEAPON_MAX } from '../data/catalog.js';
 import { tryBuy, currencyModal } from './common.js';
-import { itemsFor, ownedItem, equippedItem, thumbKey } from './garage.js';
+import { itemsFor, ownedItem, equippedItem, thumbKey, equipItem, buyItem } from './garage.js';
 import { sfx } from '../engine/audio.js';
 import { fmt } from '../engine/util.js';
 
 const CAR_CATS = [
   { id: 'body', name: 'Авто', icon: 'car', note: 'Новые автомобили открываются на следующих базах.' },
   { id: 'weapon', name: 'Оружие', icon: 'weapon', note: 'Оружие устанавливается на машину и не может быть использовано вручную.' },
+  { id: 'armor', name: 'Броня', icon: 'shield', note: 'Стальные листы навариваются на кузов: больше прочности, шипы добавляют таран.' },
   { id: 'bumper', name: 'Бампера', icon: 'bumper', note: 'Бампер усиливает таран и защищает машину.' },
   { id: 'grille', name: 'Решётки', icon: 'grille', note: 'Решётка защищает стёкла и радиатор.' },
-  { id: 'paint', name: 'Краска', icon: 'paint', note: 'Краска меняет цвет текущей машины.' },
+  { id: 'paint', name: 'Краска', icon: 'roller', note: 'Краска меняет цвет текущей машины. Рисовать баллончиком можно в гараже.' },
+  { id: 'salon', name: 'Салон', icon: 'steer', note: 'Рули и украшения салона видны из кабины во время езды.' },
   { id: 'wheels', name: 'Диски', icon: 'wheel', note: 'Диски добавляют скорость и управляемость.' },
   { id: 'items', name: 'Предметы', icon: 'box', note: 'Предметы можно использовать в поездке.' },
 ];
 
 function itemThumbKey(it) {
-  const map = { repair: 'pickup:repair', fuel: 'pickup:fuel', ammo: 'pickup:ammo', metal10: 'pickup:metal', wood10: 'pickup:wood', cloth10: 'pickup:cloth', crate: 'crate:0' };
+  const map = { repair: 'pickup:repair', fuel: 'pickup:fuel', ammo: 'pickup:ammo', metal10: 'pickup:metal', wood10: 'pickup:wood', cloth10: 'pickup:cloth', crate: 'crate:0', spray: 'spraycan' };
   return map[it.id] || 'crate:0';
 }
 
@@ -84,11 +86,12 @@ export function carShopScreen(app, startCat = 'body') {
     const c = h('div', { class: 'shop-card' }, h('h5', {}, it.name), thumbImg(isItem ? itemThumbKey(it) : thumbKey(cat, it)));
     if (cat === 'body') c.append(miniStats([['Скорость', it.speed, CAR_MAX.speed], ['Прочность', it.hp, CAR_MAX.hp], ['Багажник', it.trunk, CAR_MAX.trunk]]));
     else if (cat === 'weapon') c.append(miniStats([['Урон', it.dmg * it.rate, CAR_WEAPON_MAX.dps], ['Скорострельность', it.rate, CAR_WEAPON_MAX.rate], ['Дальность', it.range, CAR_WEAPON_MAX.range]]));
+    else if (cat === 'armor') c.append(miniStats([['Прочность', it.hp, 85], ['Таран', it.ram, 18]]));
     else if (cat === 'bumper') c.append(miniStats([['Прочность', it.hp, 60], ['Таран', it.ram, 50]]));
     else if (cat === 'grille') c.append(miniStats([['Прочность', it.hp, 70]]));
     else if (cat === 'wheels') c.append(miniStats([['Скорость', it.speed, 3], ['Управление', it.handling, 0.3]]));
     else if (isItem) c.append(h('div', { class: 'mini-stats' }, h('span', { style: { gridColumn: '1 / -1' } }, it.desc), h('span', { style: { gridColumn: '1 / -1' } }, `У тебя: ${countItem(it)}`)));
-    else c.append(h('div', { class: 'mini-stats' }, h('span', { style: { gridColumn: '1 / -1' } }, 'Внешний вид машины')));
+    else c.append(h('div', { class: 'mini-stats' }, h('span', { style: { gridColumn: '1 / -1' } }, cat === 'salon' ? 'Видно из кабины' : 'Внешний вид машины')));
     if (owned) {
       c.append(h('div', { class: 'price' }, eq ? 'Установлено' : 'Куплено'));
       c.append(
@@ -96,8 +99,7 @@ export function carShopScreen(app, startCat = 'body') {
           class: `btn ${eq ? 'dark' : 'green'}`,
           disabled: eq,
           onclick: () => {
-            if (cat === 'body') s.car = it.id;
-            else s.equip[cat] = it.id;
+            equipItem(cat, it.id);
             sfx.buy();
             store.save();
             app.refresh();
@@ -116,15 +118,7 @@ export function carShopScreen(app, startCat = 'body') {
             if (isItem) {
               if (it.give.crate) openCrate();
               else give({ res: it.give });
-            } else if (cat === 'body') {
-              s.cars.push(it.id);
-              s.carHp[it.id] = 1;
-              s.car = it.id;
-              s.stats.cars = s.cars.length;
-            } else {
-              s.owned[cat].push(it.id);
-              s.equip[cat] = it.id;
-            }
+            } else buyItem(cat, it.id);
             store.save();
             toast(`Куплено: ${it.name}`, false, 'check');
             app.refresh();

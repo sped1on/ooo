@@ -32,8 +32,25 @@ function rifle(b, o) {
     b.cyl(0.028, 0.028, 0.22, 8, BLACK, { y: 0.12, z: 0.15, rx: Math.PI / 2 });
     b.cyl(0.034, 0.034, 0.04, 8, BLACK, { y: 0.12, z: 0.27, rx: Math.PI / 2 });
   }
-  if (o.rail) b.box(0.03, 0.02, len * 0.6, BLACK, { y: 0.09, z: len * 0.3 });
-  if (o.handguard) b.box(0.07, 0.07, 0.22, o.handguard, { z: len - 0.2, y: 0.03 });
+  if (o.rail) {
+    b.box(0.03, 0.02, len * 0.6, BLACK, { y: 0.09, z: len * 0.3 });
+    for (let i = 0; i < 8; i++) b.box(0.034, 0.008, 0.012, '#1a1c20', { y: 0.101, z: len * 0.05 + i * len * 0.07 });
+  }
+  if (o.handguard) {
+    b.box(0.07, 0.07, 0.22, o.handguard, { z: len - 0.2, y: 0.03 });
+    for (let i = 0; i < 4; i++) b.box(0.074, 0.012, 0.03, '#1a1c20', { y: 0.03, z: len - 0.28 + i * 0.05 });
+  }
+  // дульный тормоз, рукоятка затвора, целик, затыльник, антабки
+  const bz = len - 0.08 + (o.barrel || 0.35);
+  b.cyl(0.024, 0.024, 0.06, 8, '#2a2c30', { z: bz, y: 0.05, rx: Math.PI / 2 });
+  for (let i = 0; i < 3; i++) b.box(0.05, 0.008, 0.008, '#15161a', { z: bz - 0.015 + i * 0.015, y: 0.075 });
+  b.box(0.05, 0.015, 0.015, '#8a8e94', { x: 0.035, y: 0.06, z: len * 0.35 });
+  b.box(0.02, 0.03, 0.02, BLACK, { y: 0.1, z: 0.02 });
+  if (o.stock !== false) {
+    b.box(0.055, 0.12, 0.02, '#15161a', { z: -0.3, y: 0.0 });
+    b.torus(0.012, 0.004, 4, 6, '#6a6e74', { z: -0.25, y: -0.055, ry: Math.PI / 2 });
+  }
+  if (o.mag) for (let i = 0; i < 3; i++) b.box(0.042, 0.006, 0.072, '#15161a', { y: -0.05 - i * (o.mag / 4), z: 0.12 });
 }
 
 export function gunGeo(model) {

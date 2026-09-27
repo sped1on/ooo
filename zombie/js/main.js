@@ -7,6 +7,7 @@ import { unlockAudio, setAudioSettings, setPaused, playMusic, stopMusic, sfx, en
 import { MenuScene, GarageScene } from './world/scenes.js';
 import { Level } from './game/level.js';
 import { initThumbs } from './ui/thumbs.js';
+import { loadSprays } from './state/spray.js';
 import { h, ui, modal, toast, rewardAd } from './ui/dom.js';
 import { icon } from './ui/icons.js';
 import { menuScreen, repairModal } from './ui/menu.js';
@@ -14,7 +15,8 @@ import { garageScreen } from './ui/garage.js';
 import { carShopScreen, gearScreen } from './ui/shops.js';
 import { rewardsScreen, tasksScreen, settingsScreen } from './ui/misc.js';
 import { mapScreen, hudScreen } from './ui/hud.js';
-import { baseInfo, findCar, findArmor, PURCHASES, RESOURCES } from './data/catalog.js';
+import { arcadeScreen, arcadeResults } from './ui/arcade.js';
+import { baseInfo, findCar, findArmor, PURCHASES, RESOURCES, levelParams, ARCADE_MAPS } from './data/catalog.js';
 import { fmt } from './engine/util.js';
 
 const QUALITY = {
@@ -33,7 +35,7 @@ const app = {
   screen: null,
   screenName: '',
   view: 'menu', // какая 3D-сцена рисуется
-  touchInput: { left: false, right: false, brake: false, fire: false, joyX: 0, joyY: 0, lookDX: 0, lookDY: 0 },
+  touchInput: { drift: false, left: false, right: false, brake: false, fire: false, joyX: 0, joyY: 0, lookDX: 0, lookDY: 0 },
   keys: new Set(),
   mouseFire: false,
   paused: false,
@@ -80,6 +82,7 @@ async function boot() {
   applyRendererQuality();
   step(60);
 
+  await loadSprays(S().cars);
   buildMenuScene();
   step(80);
   app.garage = new GarageScene(q);
@@ -115,7 +118,7 @@ function applyRendererQuality() {
 
 function buildMenuScene() {
   const info = baseInfo(S().base);
-  app.menu = new MenuScene(info.biome, app.quality(), info.name);
+  app.menu = new MenuScene(info.biome, app.quality(), info.name, S().base >= 2 ? levelParams(S().base).base || 0 : 0);
   app.menu.setCar(findCar(S().car), S().equip, carStats().weapon.model);
   app.menu.biomeBase = S().base;
   app.baseThumbUrl = null;
@@ -161,11 +164,12 @@ function loop(now) {
 
 // ------------------------------ экраны ------------------------------
 
-const VIEW = { menu: 'menu', rewards: 'menu', tasks: 'menu', settings: 'menu', garage: 'garage', shop: 'garage', gear: 'garage', results: 'garage', map: 'level', game: 'level' };
+const VIEW = { menu: 'menu', rewards: 'menu', tasks: 'menu', settings: 'menu', arcade: 'menu', garage: 'garage', shop: 'garage', gear: 'garage', results: 'garage', map: 'level', game: 'level' };
 
 app.go = (name, opts) => {
   app.screen?.onLeave?.();
   app.screen?.remove();
+  if (name !== 'game') ui().classList.remove('letterbox');
   app.screenName = name;
   app.view = VIEW[name] || 'menu';
   let el;
@@ -191,6 +195,9 @@ app.go = (name, opts) => {
       break;
     case 'settings':
       el = settingsScreen(app);
+      break;
+    case 'arcade':
+      el = arcadeScreen(app);
       break;
     case 'map':
       el = mapScreen(app, app.level);
@@ -283,7 +290,7 @@ app.baseThumb = async () => {
 // ------------------------------ ввод ------------------------------
 
 function bindInput() {
-  const KEYMAP = { KeyA: 'left', ArrowLeft: 'tleft', KeyD: 'right', ArrowRight: 'tright', KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', Space: 'fire', KeyJ: 'fire' };
+  const KEYMAP = { KeyC: 'drift', ShiftLeft: 'drift', KeyA: 'left', ArrowLeft: 'tleft', KeyD: 'right', ArrowRight: 'tright', KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', Space: 'fire', KeyJ: 'fire' };
   window.addEventListener('keydown', (e) => {
     unlockAudio();
     const k = KEYMAP[e.code];
@@ -298,7 +305,7 @@ function bindInput() {
     }
     if (e.code === 'KeyR') app.useItem('repair');
     if (e.code === 'KeyF') app.useItem('fuel');
-    if (e.code === 'KeyC') app.useItem('camera');
+    if (e.code === 'KeyV') app.useItem('camera');
     if (e.code === 'KeyH') app.useItem('med');
     if (e.code === 'KeyE') app.useItem('enter');
   });
@@ -335,16 +342,35 @@ function bindGarageOrbit(canvas) {
   const pts = new Map();
   let pinch = 0;
   const active = () => app.view === 'garage' && app.garage;
+  // баллончик: garage.js ставит app.sprayHandler(nx, ny, first) — один палец/левая кнопка рисуют,
+  // два пальца/правая кнопка крутят машину
+  const paintNdc = (x, y) => {
+    const r = canvas.getBoundingClientRect();
+    return [((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1];
+  };
+  const stroke = (p, x, y, first) => {
+    const n = first ? 1 : Math.min(12, Math.max(1, Math.ceil(Math.hypot(x - p.x, y - p.y) / 7)));
+    for (let i = 1; i <= n; i++) {
+      const [nx, ny] = paintNdc(p.x + ((x - p.x) * i) / n, p.y + ((y - p.y) * i) / n);
+      app.sprayHandler?.(nx, ny, first && i === 1);
+    }
+  };
   const start = (e) => {
     if (!active()) return;
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = { x: e.clientX, y: e.clientY, paint: false };
+    pts.set(e.pointerId, p);
     app.garage.drag = true;
     if (pts.size === 2) {
+      for (const q of pts.values()) q.paint = false;
       const [a, b] = [...pts.values()];
       pinch = Math.hypot(a.x - b.x, a.y - b.y);
+    } else if (app.garage.paintMode && app.sprayHandler && (e.pointerType === 'mouse' ? e.button === 0 : true)) {
+      p.paint = true;
+      stroke(p, e.clientX, e.clientY, true);
     }
   };
   canvas.addEventListener('pointerdown', start);
+  canvas.addEventListener('contextmenu', (e) => active() && e.preventDefault());
   // зона вращения поверх сцены (экран гаража создаёт элемент .orbit-zone)
   document.addEventListener('pointerdown', (e) => {
     if (e.target.closest?.('.orbit-zone')) {
@@ -352,24 +378,32 @@ function bindGarageOrbit(canvas) {
       start(e);
     }
   });
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest?.('.orbit-zone')) e.preventDefault();
+  });
   window.addEventListener('pointermove', (e) => {
     const p = pts.get(e.pointerId);
     if (!p || !active()) return;
     if (pts.size >= 2) {
+      const dx = e.clientX - p.x;
       p.x = e.clientX;
       p.y = e.clientY;
       const [a, b] = [...pts.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (pinch > 0) app.garage.onZoom(pinch / d);
       pinch = d;
+      if (app.garage.paintMode) app.garage.onDrag(dx * 0.5, 0);
       return;
     }
-    app.garage.onDrag(e.clientX - p.x, e.clientY - p.y);
+    if (p.paint) stroke(p, e.clientX, e.clientY, false);
+    else app.garage.onDrag(e.clientX - p.x, e.clientY - p.y);
     p.x = e.clientX;
     p.y = e.clientY;
   });
   const end = (e) => {
+    const p = pts.get(e.pointerId);
     pts.delete(e.pointerId);
+    if (p?.paint) app.sprayEnd?.();
     if (!pts.size && app.garage) app.garage.drag = false;
     pinch = 0;
   };
@@ -392,6 +426,7 @@ function applyInput() {
   const inp = lv.input;
   inp.steer = (k.has('right') || k.has('tright') || t.right ? 1 : 0) - (k.has('left') || k.has('tleft') || t.left ? 1 : 0);
   inp.gas = k.has('up');
+  inp.drift = k.has('drift') || t.drift;
   inp.brake = k.has('down') || t.brake;
   inp.fire = k.has('fire') || app.mouseFire || t.fire;
   inp.moveX = (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0) + t.joyX;
@@ -466,13 +501,161 @@ app.openMap = () => {
   }, 60);
 };
 
+// ------------------------------ аркада ------------------------------
+
+app.startArcade = async (mapId) => {
+  const s = S();
+  const map = ARCADE_MAPS.find((m) => m.id === mapId) || ARCADE_MAPS[0];
+  s.arcadeMap = map.id;
+  if (!s.tutorialSeen) {
+    await tutorial();
+    s.tutorialSeen = true;
+    store.save();
+  }
+  await showFullscreenAd();
+  const load = h('div', { class: 'black on', style: { transition: 'none' } }, h('div', { class: 'type2' }, 'Прокладываем трассу…'));
+  ui().append(load);
+  setTimeout(() => {
+    app.level?.dispose();
+    const st = carStats();
+    const ammoBoxes = Math.min(s.inv.ammo || 0, 3);
+    app.levelAmmo = ammoBoxes;
+    s.inv.ammo = Math.max(0, (s.inv.ammo || 0) - ammoBoxes);
+    app.level = new Level({
+      dest: Math.max(2, s.base + 1),
+      arcade: map,
+      arcadeBest: s.arcadeBest || 0,
+      stats: st,
+      equip: s.equip,
+      gun: gunStats(),
+      armor: armorTotal(),
+      vest: s.vest,
+      helmet: s.helmet,
+      inv: { repair: s.inv.repair || 0, fuel: s.inv.fuel || 0, med1: s.inv.med1 || 0, med2: s.inv.med2 || 0, med3: s.inv.med3 || 0, med4: s.inv.med4 || 0 },
+      ammoBoxes,
+      armory: s.baseUp.armory || 0,
+      carHpFrac: 1,
+      settings: s.settings,
+      quality: app.quality(),
+      onEvent: levelEvent,
+    });
+    app.level.resize(app.w, app.h);
+    store.save();
+    app.go('game');
+    app.level.startArcade();
+    gameplayStart();
+    load.remove();
+  }, 60);
+};
+
+function arcadeFail(reason) {
+  const lv = app.level;
+  if (!lv) return;
+  gameplayStop();
+  const title = reason === 'fuel' ? 'Кончилось топливо!' : 'Машина уничтожена!';
+  const m = modal([
+    h('h2', {}, title),
+    h('p', {}, `Пройдено: ${((lv.stats.distance || 0) / 1000).toFixed(2)} км`),
+    h(
+      'div',
+      { class: 'btns' },
+      lv.revives < 1
+        ? h('button', {
+            class: 'btn yellow big',
+            html: `${icon('video')} Ехать дальше`,
+            onclick: async () => {
+              if (await rewardAd()) {
+                m.close();
+                lv.revive();
+                gameplayStart();
+              }
+            },
+          })
+        : null,
+      h('button', { class: 'btn dark', onclick: () => (m.close(), finishArcade()) }, 'Завершить заезд'),
+    ),
+  ]);
+}
+
+// Итоги аркады: рекорд, таблица лидеров, награды
+function finishArcade() {
+  const lv = app.level;
+  if (!lv) return;
+  const s = S();
+  const r = lv.result();
+  const dist = Math.floor(lv.stats.distance || 0);
+  applyStats(r);
+  let res = 0;
+  for (const k of ['wood', 'metal', 'cloth', 'ammo']) {
+    s.inv[k] = (s.inv[k] || 0) + r.collected[k];
+    res += r.collected[k];
+  }
+  const cash = r.picked + Math.floor((dist / 1000) * 150);
+  s.cash += cash;
+  const record = dist > (s.arcadeBest || 0);
+  if (record) s.arcadeBest = dist;
+  s.stats.arcade = Math.max(s.stats.arcade || 0, dist);
+  s.arcadeTop = [...(s.arcadeTop || []), { d: dist, t: Date.now(), car: s.car }].sort((a, b) => b.d - a.d).slice(0, 10);
+  s.arcadeRuns = (s.arcadeRuns || 0) + 1;
+  store.save();
+  if (record) submitScore('arcade', dist);
+  gameplayStop();
+  const mapId = lv.arcade.id;
+  lv.dispose();
+  app.level = null;
+  app.go('arcade');
+  if (record) setTimeout(() => sfx.win(), 200);
+  const m = modal(
+    arcadeResults(
+      { dist, best: s.arcadeBest, record, kills: r.kills, cash, res },
+      () => (m.close(), app.startArcade(mapId)),
+      () => m.close(),
+      () => (m.close(), app.go('menu')),
+    ),
+    { cls: 'arc-res' },
+  );
+}
+
 app.leaveLevel = () => {
   app.level?.dispose();
   app.level = null;
   app.go('menu');
 };
 
+// Инструкция перед первой поездкой
+function tutorial() {
+  return new Promise((resolve) => {
+    const touch = isTouch;
+    const li = (ic, t) => h('div', { class: 'tut-row', html: `${icon(ic)}<span>${t}</span>` });
+    const m = modal(
+      [
+        h('h2', {}, 'Как играть'),
+        h('p', {}, 'Доберись до следующей базы живым. По пути собирай ресурсы и отбивайся от зомби.'),
+        h(
+          'div',
+          { class: 'tut' },
+          li('car', touch ? 'Руль — кнопки ◀ ▶ внизу слева. Машина едет сама, тормоз — кнопка со знаком.' : 'Руль — A/D или ◀ ▶, газ — W, тормоз — S, дрифт — C (удерживай в повороте).'),
+          li('fire', touch ? 'Огонь — большая кнопка справа. Оружие само наводится на ближайшую цель.' : 'Огонь — Пробел или левая кнопка мыши. Оружие само наводится на цель.'),
+          li('skull', 'Зомби цепляются за машину сбоку — виляй рулём, чтобы их стряхнуть. Ползунов и ходоков можно давить.'),
+          li('pump', 'Посередине пути заправка: выйди из машины, дойди до колонки (жёлтая метка) и вернись. Пешком оружие стреляет само, когда зомби в прицеле.'),
+          li('box', 'Дерево, металл, ткань и патроны кладутся в багажник — его объём зависит от машины. Металл чинит машину.'),
+          li('wrench', 'Ремкомплект и канистра — кнопки справа (R и F). Камеру можно переключить (V).'),
+          li('bandit', 'Берегись лагеря бандитов, мин и шипов. Перед воротами базы ждёт босс.'),
+          li('map', 'На развилке смотри на указатель: зелёная стрелка ведёт к базе, красная — к орде. С трамплина разгоняйся посильнее.'),
+        ),
+        h('button', { class: 'btn yellow big', onclick: () => m.close() }, 'Понятно, поехали!'),
+      ],
+      { onClose: resolve, cls: 'tut-modal' },
+    );
+  });
+}
+
 app.startDrive = async () => {
+  if (!S().tutorialSeen) {
+    await tutorial();
+    S().tutorialSeen = true;
+    store.save();
+  }
   await showFullscreenAd();
   const lv = app.level;
   const s = S();
@@ -505,7 +688,7 @@ function levelEvent(type, data) {
       arrive(data);
       break;
     case 'dead':
-      setTimeout(() => failModal(data), 1400);
+      setTimeout(() => (app.level?.arcade ? arcadeFail(data) : failModal(data)), 1400);
       break;
     default:
       break;
@@ -604,6 +787,10 @@ function failModal(reason) {
 function quitLevel(why) {
   const lv = app.level;
   if (!lv) return;
+  if (lv.arcade) {
+    finishArcade();
+    return;
+  }
   const r = lv.result();
   const s = S();
   applyStats(r);
@@ -627,6 +814,7 @@ function applyStats(r) {
   s.stats.footKills += r.footKills;
   s.stats.crates += r.crates;
   s.stats.bosses = (s.stats.bosses || 0) + (r.bosses || 0);
+  s.stats.jumps = (s.stats.jumps || 0) + (r.jumps || 0);
   s.stats.distance += r.distance;
   s.stats.wood += r.collected.wood;
   s.stats.metal += r.collected.metal;

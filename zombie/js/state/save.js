@@ -16,17 +16,17 @@ export function defaultSave() {
     car: 'rusty',
     cars: ['rusty'],
     carHp: { rusty: 1 },
-    owned: { bumper: ['none'], grille: ['none'], paint: ['factory'], wheels: ['std'], weapon: ['mg1'] },
-    equip: { bumper: 'none', grille: 'none', paint: 'factory', wheels: 'std', weapon: 'mg1' },
+    owned: { bumper: ['none'], grille: ['none'], paint: ['factory'], wheels: ['std'], weapon: ['mg1'], armor: ['none'], steer: ['std'], hang: ['none'], dash: ['none'] },
+    equip: { bumper: 'none', grille: 'none', paint: 'factory', wheels: 'std', weapon: 'mg1', armor: 'none', steer: 'std', hang: 'none', dash: 'none' },
     guns: ['g17'],
     gun: 'g17',
     gunUp: {},
     armor: [],
     vest: null,
     helmet: null,
-    inv: { wood: 0, metal: 0, cloth: 0, ammo: 2, repair: 1, fuel: 1, med1: 2, med2: 0, med3: 0, med4: 0, crate: 0 },
+    inv: { wood: 0, metal: 0, cloth: 0, ammo: 2, repair: 1, fuel: 1, med1: 2, med2: 0, med3: 0, med4: 0, crate: 0, spray: 100 },
     baseUp: { workshop: 0, armory: 0, depot: 0 },
-    stats: { kills: 0, brutes: 0, bosses: 0, bandits: 0, footKills: 0, crates: 0, wood: 0, metal: 0, cloth: 0, distance: 0, purchases: 0, maxBase: 1, baseUps: 0, cars: 1, refuels: 0, levels: 0 },
+    stats: { kills: 0, brutes: 0, bosses: 0, bandits: 0, footKills: 0, crates: 0, wood: 0, metal: 0, cloth: 0, distance: 0, purchases: 0, maxBase: 1, baseUps: 0, cars: 1, refuels: 0, levels: 0, jumps: 0, arcade: 0 },
     tasks: {},
     daily: { n: 0, last: '' },
     wheelLast: 0,
@@ -42,6 +42,7 @@ function merge(def, s) {
   }
   for (const slot of Object.keys(def.owned)) {
     if (!Array.isArray(out.owned[slot])) out.owned[slot] = def.owned[slot];
+    if (!out.equip[slot]) out.equip[slot] = def.equip[slot];
   }
   if (!Array.isArray(out.cars) || !out.cars.length) out.cars = def.cars;
   if (!Array.isArray(out.guns) || !out.guns.length) out.guns = def.guns;
@@ -135,16 +136,17 @@ export function carStats(carId = S().car, equip = S().equip) {
   const grille = findPart('grille', equip.grille);
   const wheels = findPart('wheels', equip.wheels);
   const weapon = findPart('weapon', equip.weapon);
+  const armor = findPart('armor', equip.armor || 'none');
   const ws = 1 + (s.baseUp.workshop || 0) * 0.1;
   return {
     car,
-    hp: Math.round((car.hp + bumper.hp + grille.hp) * ws),
+    hp: Math.round((car.hp + bumper.hp + grille.hp + armor.hp) * ws),
     speed: car.speed + wheels.speed,
     handling: car.handling + wheels.handling,
-    ram: car.ram + bumper.ram,
+    ram: car.ram + bumper.ram + armor.ram,
     fuel: Math.round(car.fuel * (1 + (s.baseUp.depot || 0) * 0.15)),
     trunk: car.trunk,
-    armor: Math.min(0.6, (bumper.hp + grille.hp) / 160),
+    armor: Math.min(0.65, (bumper.hp + grille.hp + armor.hp) / 190),
     weapon,
     spikes: wheels.spikes,
     dps: weapon.dmg * weapon.rate * (weapon.pellets || 1),

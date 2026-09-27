@@ -15,7 +15,23 @@ const POI = {
   base: { icon: 'home', name: 'База' },
   bridge: { icon: 'bridge', name: 'Мост' },
   boss: { icon: 'skull', name: 'Босс' },
+  fork: { icon: 'map', name: 'Развилка' },
+  jump: { icon: 'speed', name: 'Трамплин' },
 };
+
+const TIME_NAMES = { day: 'день', sunset: 'закат', dawn: 'рассвет', overcast: 'пасмурно', night: 'ночь' };
+const WEATHER_NAMES = { rain: 'дождь', snow: 'снегопад', fog: 'туман' };
+const TERRAIN_NAMES = { valley: 'долина', hills: 'холмы', plain: 'равнина', mountain: 'горы', canyon: 'каньон' };
+
+export function levelTags(p) {
+  const t = [TIME_NAMES[p.time] || 'день'];
+  if (p.storm) t.push('гроза');
+  else if (WEATHER_NAMES[p.weather]) t.push(WEATHER_NAMES[p.weather]);
+  t.push(TERRAIN_NAMES[p.terrain] || 'долина');
+  if (p.jumps) t.push(`трамплины: ${p.jumps}`);
+  if (p.forks) t.push(`развилки: ${p.forks}`);
+  return t.join(' · ');
+}
 
 // ------------------------------ карта уровня ------------------------------
 
@@ -38,7 +54,7 @@ export function mapScreen(app, level) {
       'div',
       { class: 'map-goal panel' },
       h('span', { html: icon('info', 'warn') }),
-      h('div', {}, h('b', {}, 'Текущая цель'), h('span', {}, `Добраться до базы ${level.dest}`)),
+      h('div', {}, h('b', {}, 'Текущая цель'), h('span', {}, `Добраться до базы ${level.dest}`), h('small', { class: 'lvl-tags' }, `«${level.params.title}» — ${levelTags(level.params)}`)),
     ),
   );
   // мини-схема
@@ -107,6 +123,8 @@ export function mapScreen(app, level) {
           title = `Босс: ${m.name}`;
           sub = 'Охраняет ворота базы';
         }
+        if (m.type === 'fork') sub = m.side > 0 ? 'Держись правее' : 'Держись левее';
+        if (m.type === 'jump') sub = 'Прыжок над машинами';
         if (m.type === 'base') {
           title = m.start ? from.name : to.name;
           sub = m.start ? `Уровень ${level.dest - 1} · вы здесь` : `Уровень ${level.dest}`;
@@ -172,7 +190,7 @@ function drawSketch(cv, level) {
     const i = Math.round((s / level.L) * (rot.length - 1));
     return P(rot[Math.max(0, Math.min(rot.length - 1, i))]);
   };
-  const colors = { zombies: '#c62a24', res: '#3fae2a', station: '#2f7ae0', camp: '#e8962a', bridge: '#6a7a8a' };
+  const colors = { zombies: '#c62a24', res: '#3fae2a', station: '#2f7ae0', camp: '#e8962a', bridge: '#6a7a8a', fork: '#ffd21a', jump: '#b87aff', boss: '#6a0f0a' };
   for (const poi of level.world.pois) {
     if (poi.type === 'base') continue;
     const [x, y] = at(poi.s);
@@ -214,7 +232,7 @@ export function hudScreen(app, level, touch) {
       routeBar.append(h('span', { class: `mk ${p.type}`, style: { left: `${(p.s / level.L) * 100}%` }, html: icon(p.type === 'station' ? 'pump' : 'bandit') }));
     }
   }
-  routeBar.append(h('span', { class: 'mk end', style: { left: '100%' }, html: icon('home') }));
+  routeBar.append(h('span', { class: 'mk end', style: { left: '100%' }, html: icon(level.arcade ? 'trophy' : 'home') }));
   const distTxt = h('span');
   const objTxt = h('span');
   const hpBar = statBar(1, 1, 0, 'hp good');
@@ -283,9 +301,10 @@ export function hudScreen(app, level, touch) {
     const l = hold(h('div', { class: 'ctl steer l', html: icon('left') }), () => (input.left = true), () => (input.left = false));
     const r = hold(h('div', { class: 'ctl steer r', html: icon('right') }), () => (input.right = true), () => (input.right = false));
     const br = hold(h('div', { class: 'ctl small brake', html: icon('brake') }), () => (input.brake = true), () => (input.brake = false));
-    driveCtl.append(l, r, br);
+    const dr = hold(h('div', { class: 'ctl small drift', html: '<span class="dtxt">ДРИФТ</span>' }), () => (input.drift = true), () => (input.drift = false));
+    driveCtl.append(l, r, br, dr);
   } else {
-    driveCtl.append(h('div', { class: 'keys-hint', html: '<kbd>A</kbd>/<kbd>D</kbd> руль · <kbd>W</kbd> газ · <kbd>S</kbd> тормоз · <kbd>Пробел</kbd>/ЛКМ огонь<br><kbd>R</kbd> ремонт · <kbd>F</kbd> канистра · <kbd>C</kbd> камера · <kbd>Esc</kbd> пауза' }));
+    driveCtl.append(h('div', { class: 'keys-hint', html: '<kbd>A</kbd>/<kbd>D</kbd> руль · <kbd>W</kbd> газ · <kbd>S</kbd> тормоз · <kbd>Пробел</kbd>/ЛКМ огонь<br><kbd>C</kbd> дрифт · <kbd>R</kbd> ремонт · <kbd>F</kbd> канистра · <kbd>V</kbd> камера · <kbd>Esc</kbd> пауза' }));
   }
   driveCtl.append(fireBtn, repairBtn, canBtn, camBtn);
   // пешком
@@ -383,7 +402,7 @@ export function hudScreen(app, level, touch) {
     quest.className = `quest panel${done ? ' done' : ''}`;
     quest.innerHTML = `${icon(done ? 'check' : 'skull')}<div>Убить зомби<br><b>${Math.min(d.kills, d.killGoal)}/${d.killGoal}</b></div>`;
     objTxt.textContent = d.objective;
-    distTxt.textContent = `${fmt(d.distLeft)} м`;
+    distTxt.textContent = d.distText ?? `${fmt(d.distLeft)} м`;
     fill.style.width = `${d.progress * 100}%`;
     const hpK = d.hp / d.maxHp;
     hpBar.firstChild.style.width = `${hpK * 100}%`;

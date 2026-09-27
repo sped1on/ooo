@@ -190,6 +190,14 @@ export const sfx = {
     tone(1600, 0.6, { type: 'sine', gain: 0.18 });
     tone(2400, 0.4, { type: 'sine', gain: 0.08 });
   },
+  spray() {
+    ensure();
+    noise(0.12, { freq: 5200, gain: 0.05, type: 'highpass', q: 0.7, attack: 0.01, decay: 0.1 });
+  },
+  skid() {
+    ensure();
+    noise(0.4, { freq: 1500, gain: 0.07, type: 'bandpass', q: 5, attack: 0.05, decay: 0.38 });
+  },
   gate() {
     ensure();
     noise(1.6, { freq: 300, gain: 0.25, type: 'bandpass', q: 6, attack: 0.1, decay: 1.5 });
@@ -220,6 +228,16 @@ export const sfx = {
   win() {
     ensure();
     [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.3, { type: 'triangle', gain: 0.18, when: i * 0.1 }));
+  },
+  thunder() {
+    ensure();
+    noise(2.8, { freq: 120, sweep: 60, gain: 0.5, type: 'lowpass', q: 0.7, attack: 0.05, decay: 2.7 });
+    noise(0.5, { freq: 900, gain: 0.12, type: 'lowpass', q: 0.5, attack: 0.01, decay: 0.45 });
+  },
+  landing() {
+    ensure();
+    noise(0.35, { freq: 180, gain: 0.35, type: 'lowpass', q: 0.8, attack: 0.005, decay: 0.3 });
+    tone(55, 0.25, { type: 'sine', gain: 0.25, attack: 0.005 });
   },
   alarm() {
     ensure();

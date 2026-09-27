@@ -14,7 +14,12 @@ export function h(tag, attrs = {}, ...kids) {
     if (k === 'class') el.className = v;
     else if (k === 'html') el.innerHTML = v;
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') {
+      for (const sk in v) {
+        if (sk.startsWith('--')) el.style.setProperty(sk, v[sk]);
+        else el.style[sk] = v[sk];
+      }
+    }
     else el.setAttribute(k, v === true ? '' : v);
   }
   for (const c of kids.flat()) {

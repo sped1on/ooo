@@ -192,6 +192,26 @@ export async function submitScore(name, value) {
   }
 }
 
+// Таблица лидеров: { entries: [{ rank, score, name, me }], userRank } или null вне Яндекса
+export async function getLeaderboard(name, top = 10) {
+  if (!ysdk) return null;
+  try {
+    let res;
+    if (ysdk.leaderboards?.getEntries) res = await ysdk.leaderboards.getEntries(name, { quantityTop: top, includeUser: true, quantityAround: 2 });
+    else {
+      const lb = await ysdk.getLeaderboards();
+      res = await lb.getLeaderboardEntries(name, { quantityTop: top, includeUser: true, quantityAround: 2 });
+    }
+    const myId = player?.getUniqueID?.();
+    return {
+      userRank: res.userRank || 0,
+      entries: (res.entries || []).map((e) => ({ rank: e.rank, score: e.score, name: e.player?.publicName || 'Игрок', me: !!myId && e.player?.uniqueID === myId })),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ------------------------------ покупки ------------------------------
 
 export const hasPayments = () => !!payments;

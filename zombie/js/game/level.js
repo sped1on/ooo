@@ -2,9 +2,9 @@
 
 import * as THREE from 'three';
 import { Rng, clamp, lerp, damp, smoothstep, angleDiff } from '../engine/util.js';
-import { Track, ROAD_HALF } from '../world/track.js';
+import { Track, ArcadeTrack, ROAD_HALF, BRANCH_HALF } from '../world/track.js';
 import { buildLevelWorld } from '../world/level-world.js';
-import { makeSky, makeMountains, makeLights, followSun } from '../world/env.js';
+import { makeSky, makeMountains, makeLights, followSun, levelEnv, Weather } from '../world/env.js';
 import { CarModel, Cockpit, buildCarWeapon } from '../world/cars.js';
 import { Humans, ZTYPES, poseRig } from '../world/characters.js';
 import { ViewModel } from '../world/guns.js';
@@ -19,6 +19,7 @@ const V3 = () => new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _fr = {};
+const _col = new THREE.Color();
 
 const RES_KINDS = ['wood', 'metal', 'cloth', 'ammo'];
 
@@ -31,6 +32,16 @@ export class Level {
     this.biome = BIOMES[this.info.biome];
     this.params = levelParams(opts.dest);
     this.rng = new Rng(opts.dest * 977 + 13);
+    // аркада: своя карта, сложность растёт с пройденными километрами
+    this.arcade = opts.arcade || null;
+    if (this.arcade) {
+      const m = this.arcade;
+      this.info = { n: 0, name: 'Аркада', sub: m.name, biome: m.biome };
+      this.fromInfo = this.info;
+      this.biome = BIOMES[m.biome];
+      this.params = { ...levelParams(2), ...m, forks: 0, title: m.name };
+      this.rng = new Rng((Date.now() % 100000) + 7);
+    }
     this.t = 0;
     this.state = 'map';
     this.paused = false;
@@ -50,20 +61,29 @@ export class Level {
     const q = o.quality;
     const scene = (this.scene = new THREE.Scene());
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 2400);
-    this.fog = new THREE.Fog(this.biome.fog, 70, q.fogFar);
-    scene.background = new THREE.Color(this.biome.fog);
+    const pr = this.params;
+    const env = (this.env = levelEnv(this.biome, pr));
+    this.fog = new THREE.Fog(env.fog, env.fogNear, q.fogFar * env.fogK);
+    scene.background = new THREE.Color(env.fog);
 
-    this.sky = makeSky(this.biome);
+    this.sky = makeSky(env);
     scene.add(this.sky);
-    this.mountains = makeMountains(this.biome, this.dest);
+    this.mountains = makeMountains(env, this.dest, pr.terrain === 'mountain' || pr.terrain === 'canyon');
     scene.add(this.mountains);
-    this.lights = makeLights(scene, this.biome, q.shadows, 55);
+    this.lights = makeLights(scene, env, q.shadows, 55);
 
-    const L = this.params.length;
+    // длиннее, если есть развилки и трамплины
+    let L = pr.length + (pr.forks || 0) * 120 + (pr.jumps || 0) * 50;
+    if (this.arcade) {
+      this.track = new ArcadeTrack({ seed: 4000 + this.arcade.id.length * 97, hillAmp: pr.hillAmp, terrain: pr.terrain, jumps: pr.jumps });
+      L = this.track.L;
+    } else this.track = new Track({ seed: this.dest * 131 + 7, length: L, stationS: Math.round(L * 0.5), bridgeS: Math.round(L * 0.38), campS: Math.round(L * 0.8), curvy: pr.curvy, hillAmp: pr.hillAmp, terrain: pr.terrain, forks: pr.forks, jumps: pr.jumps });
     this.L = L;
-    this.track = new Track({ seed: this.dest * 131 + 7, length: L, stationS: Math.round(L * 0.5), bridgeS: Math.round(L * 0.38), campS: Math.round(L * 0.8) });
-    this.track.buildMeshes(this.biome, scene);
-    this.world = buildLevelWorld(scene, this.track, this.biome, this.params, this.rng, { detail: q.detail, fromName: this.fromInfo.name, toName: this.info.name });
+    this.track.buildMeshes(this.biome, scene, env);
+    const prevPreset = levelParams(Math.max(2, this.dest - 1));
+    this.world = buildLevelWorld(scene, this.track, this.biome, pr, this.rng, { detail: q.detail, fromName: this.fromInfo.name, toName: this.info.name, fromBase: this.dest > 2 ? prevPreset.base : 0, arcade: !!this.arcade });
+    if (pr.weather === 'rain' || pr.weather === 'snow') this.weather = new Weather(scene, pr.weather, q.particles);
+    if (env.night && this.world.canopy) this.world.canopy.material.emissive = new THREE.Color('#6a5a40');
     this.buildRoute();
     // лесной покров до горизонта — виден на карте уровня
     const ct = canopyTex();
@@ -82,9 +102,22 @@ export class Level {
     scene.add(this.carModel.group);
     this.cockpit = new Cockpit(this.carModel);
     this.carModel.body.add(this.cockpit.group);
+    if (env.night || pr.weather === 'fog') {
+      // фары: конус света вперёд и слабая подсветка вокруг машины
+      const hl = new THREE.SpotLight('#fff0d0', env.night ? 260 : 90, 75, 0.55, 0.65, 1.3);
+      hl.position.set(0, 1.0, this.carModel.frontZ - 0.3);
+      hl.target.position.set(0, -1.2, this.carModel.frontZ + 20);
+      this.carModel.body.add(hl, hl.target);
+      if (q.detail >= 0.8) {
+        const glow = new THREE.PointLight('#ffe0b0', env.night ? 6 : 2, 9, 1.5);
+        glow.position.set(0, 2.2, 0);
+        this.carModel.body.add(glow);
+      }
+      this.headlights = hl;
+    }
     const st = o.stats;
     this.car = {
-      s: BASE.carStartZ,
+      s: this.arcade ? 4 : BASE.carStartZ,
       x: 0,
       v: 0,
       ang: 0,
@@ -99,8 +132,11 @@ export class Level {
       bumpV: 0,
       roll: 0,
       pitch: 0,
+      y: 0,
+      vy: 0,
+      air: false,
     };
-    this.fuelRate = (st.fuel * 0.72) / (L * 0.5);
+    this.fuelRate = this.arcade ? st.fuel / 1150 : (st.fuel * 0.72) / (L * 0.5);
     this.camMode = o.settings.camera === 'chase' || innerWidth < innerHeight ? 'chase' : 'cockpit';
 
     // оружие машины
@@ -141,7 +177,7 @@ export class Level {
     for (const t of sp.turrets) this.spawnTurret(t);
 
     this.station = this.world.station;
-    this.stationDone = false;
+    this.stationDone = !!this.arcade;
     this.pumpProgress = 0;
     this.player = null;
     this.warned = {};
@@ -160,7 +196,8 @@ export class Level {
     for (let s = -20; s <= this.L + 20; s += 4) {
       const f = tr.frame(s, _fr);
       const y = f.y + 1.2;
-      pts.push(f.x - f.rx * half, y, f.z - f.rz * half, f.x + f.rx * half, y, f.z + f.rz * half);
+      const rx = tr.routeX(s);
+      pts.push(f.x + f.rx * (rx - half), y, f.z + f.rz * (rx - half), f.x + f.rx * (rx + half), y, f.z + f.rz * (rx + half));
       uvs.push(0, s / 30, 1, s / 30);
       if (row > 0) {
         const a = (row - 1) * 2;
@@ -322,6 +359,7 @@ export class Level {
     const c = this.car;
     const ahead = this.state === 'map' ? -1e9 : (this.player ? this.player.s : c.s) + 170;
     const P = this.pending;
+    if (this.arcade && this.state !== 'map') this.arcadeSpawn(ahead + 30);
     const bs = this.world.spawns.boss;
     if (bs && !this.bossSpawned && this.state !== 'map' && c.s > bs.s - 150) {
       this.bossSpawned = true;
@@ -340,7 +378,7 @@ export class Level {
     }
     while (this.idx.pickups < P.pickups.length && P.pickups[this.idx.pickups].s < ahead) {
       const d = P.pickups[this.idx.pickups++];
-      this.addPickup(d.s, d.x, d.kind);
+      this.addPickup(d.s, d.x, d.kind, d.dy);
     }
     while (this.idx.obstacles < P.obstacles.length && P.obstacles[this.idx.obstacles].s < ahead) {
       const d = P.obstacles[this.idx.obstacles++];
@@ -367,12 +405,12 @@ export class Level {
     }
   }
 
-  addPickup(s, x, kind) {
+  addPickup(s, x, kind, dy = 0) {
     const m = makePickup(kind);
     this.wpos(s, x);
     m.position.copy(_v);
     this.scene.add(m);
-    this.pickups.push({ s, x, kind, mesh: m, alive: true, bob: this.rng.f(0, 6) });
+    this.pickups.push({ s, x, kind, mesh: m, alive: true, bob: this.rng.f(0, 6), dy });
   }
 
   // ------------------------------ основной цикл ------------------------------
@@ -427,11 +465,17 @@ export class Level {
     }
     this.humans.commit();
     this.fx.update(dt);
+    if (this.weather) {
+      this.weather.mesh.visible = this.state !== 'map';
+      this.weather.update(dt, this.camera);
+    }
+    if (this.params.storm && this.state !== 'map') this.updateStorm(dt);
     // небо и горы вокруг камеры
     this.sky.position.copy(this.camera.position);
     this.mountains.position.set(this.camera.position.x, this.state === 'map' ? this.routeBox.min.y - 30 : this.camera.position.y - 60, this.camera.position.z);
     // ворота баз
     for (const b of this.world.bases) {
+      if (this.camera.position.distanceToSquared(b.group.position) < 150 * 150 || this.state === 'map') b.flag.update(dt);
       b.left.rotation.y = b.open * 1.65;
       b.right.rotation.y = Math.PI - b.open * 1.65;
       b.garageDoor.position.y = 2.4 + b.garageOpen * 4.2;
@@ -439,10 +483,33 @@ export class Level {
     }
   }
 
+  // Гроза: редкие вспышки молний с громом
+  updateStorm(dt) {
+    const L = this.lights;
+    this.flashT = (this.flashT ?? 6) - dt;
+    if (this.flashT <= 0) {
+      this.flashT = 7 + Math.random() * 10;
+      this.flash = 1;
+      setTimeout(() => sfx.thunder?.(), 250 + Math.random() * 900);
+    }
+    if (this.flash > 0) {
+      this.flash = Math.max(0, this.flash - dt * 2.6);
+      const k = this.flash > 0.55 || (this.flash > 0.2 && this.flash < 0.35) ? this.flash : this.flash * 0.3;
+      L.hemi.intensity = L.hemiI + k * 3.2;
+      this.scene.background.set(this.env.fog).lerp(_col.set('#8a9ab8'), k * 0.6);
+    } else if (L.hemi.intensity !== L.hemiI) {
+      L.hemi.intensity = L.hemiI;
+      this.scene.background.set(this.env.fog);
+    }
+  }
+
   // ------------------------------ карта уровня ------------------------------
 
   updateMap(dt) {
     this.scene.fog = null;
+    // карта всегда «днём», даже если поездка ночью
+    this.lights.hemi.intensity = Math.max(1.35, this.lights.hemiI);
+    this.lights.sun.intensity = Math.max(2.2, this.lights.sunI);
     this.route.visible = true;
     this.canopy.visible = true;
     this.sky.visible = false;
@@ -501,7 +568,9 @@ export class Level {
     this.canopy.visible = false;
     this.sky.visible = true;
     this.mountains.visible = true;
-    this.scene.background.set(this.biome.fog);
+    this.scene.background.set(this.env.fog);
+    this.lights.hemi.intensity = this.lights.hemiI;
+    this.lights.sun.intensity = this.lights.sunI;
     this.camera.far = 2400;
     this.camera.updateProjectionMatrix();
     this.carModel.group.visible = true;
@@ -511,6 +580,141 @@ export class Level {
     this.cockpit.visible = false;
     this.engineOn = false;
     sfx.gate();
+  }
+
+  // Аркада: сразу за рулём, без карты и кат-сцены
+  startArcade() {
+    this.scene.fog = this.fog;
+    this.route.visible = false;
+    this.canopy.visible = false;
+    this.sky.visible = true;
+    this.mountains.visible = true;
+    this.scene.background.set(this.env.fog);
+    this.lights.hemi.intensity = this.lights.hemiI;
+    this.lights.sun.intensity = this.lights.sunI;
+    this.lights.sun.castShadow = this.o.quality.shadows;
+    this.camera.far = 2400;
+    this.camera.updateProjectionMatrix();
+    this.carModel.group.visible = true;
+    this.state = 'drive';
+    this.car.v = 10;
+    this.camBlend = this.camMode === 'cockpit' ? 1 : 0;
+    this.snapCamera = true;
+    this.genS = 60;
+    this.nextFuelS = 320;
+    this.nextRepairS = 900;
+    this.nextAmmoS = 200;
+    this.nextBossS = 1800;
+    this.arcK = -1;
+    engineStart();
+    this.engineOn = true;
+    this.notice('Аркада: проедь как можно дальше!', 3);
+    this.o.onEvent?.('drive');
+  }
+
+  // Появление зомби, препятствий и припасов впереди (аркада)
+  arcadeSpawn(ahead) {
+    const c = this.car;
+    const tr = this.track;
+    const rng = this.rng;
+    const P = this.pending;
+    const pr = this.params;
+    // сложность растёт каждые 700 м
+    const k = Math.floor(Math.max(0, c.s) / 700);
+    if (k !== this.arcK) {
+      this.arcK = k;
+      const lp = levelParams(2 + k);
+      Object.assign(pr, { mix: lp.mix, hpMul: lp.hpMul, speedMul: lp.speedMul, dmgMul: lp.dmgMul, zombieDensity: lp.zombieDensity, bossMul: lp.bossMul });
+      if (k > 0) this.notice(`Уровень угрозы ${k + 1}: зомби сильнее!`, 2.5, 'bad');
+    }
+    const rampAt = (a, b) => {
+      const out = [];
+      const lap = Math.floor(a / tr.P);
+      for (const r of tr.ramps) for (const lp of [lap - 1, lap, lap + 1]) {
+        const rs = lp * tr.P + r.s;
+        if (rs + r.len + 40 > a && rs - 25 < b) out.push({ ...r, s: rs });
+      }
+      return out;
+    };
+    while (this.genS < ahead) {
+      const s0 = this.genS;
+      const s1 = s0 + 40;
+      this.genS = s1;
+      const zs = [];
+      const ps = [];
+      const os = [];
+      const ramps = rampAt(s0, s1);
+      for (const r of ramps) {
+        const end = r.s + r.len;
+        if (end + 5.5 < s0 || end + 5.5 >= s1) continue;
+        for (const x of [-2.6, 2.6]) os.push({ kind: 'wreck', s: end + 5.5, x, v: rng.i(0, 4), yaw: Math.PI / 2 + rng.f(-0.15, 0.15) });
+        const vy = 22 * ((r.h * 1.35) / r.len);
+        for (let i = 0; i < 8; i++) {
+          const d = 1.5 + i * 1.9;
+          const t = d / 22;
+          ps.push({ s: end + d, x: 0, kind: 'cash', dy: Math.max(0, r.h + vy * t - 11 * t * t) });
+        }
+      }
+      if (!ramps.length) {
+        const nz = Math.round(40 * pr.zombieDensity * 1.25 + rng.f(0, 1.5));
+        for (let i = 0; i < nz; i++) zs.push({ s: rng.f(s0, s1), x: rng.f(-15, 15), type: pickZombieType(pr.mix, rng.next()) });
+        if (rng.chance(0.08 + Math.min(0.1, k * 0.02))) {
+          const hs = rng.f(s0, s1);
+          for (let i = 0; i < 8 + k * 2; i++) zs.push({ s: hs + rng.f(-12, 12), x: rng.f(-10, 10), type: pickZombieType(pr.mix, rng.next()) });
+          this.notice('Впереди орда!', 2, 'bad');
+        }
+        if (rng.chance(0.35)) {
+          const s = rng.f(s0 + 5, s1 - 5);
+          const r = rng.next();
+          if (r < 0.3) os.push({ kind: 'wreck', s, x: rng.sign() * rng.f(1.5, 4.5), v: rng.i(0, 4), yaw: rng.f(-0.8, 0.8) });
+          else if (r < 0.5) os.push({ kind: 'block', s, x: rng.sign() * 3.5, v: rng.i(0, 1) });
+          else if (r < 0.75) os.push({ kind: 'barrel', s, x: rng.f(-5, 5) });
+          else os.push({ kind: 'crate', s, x: rng.f(-5, 5) });
+        }
+        if (k >= 1 && rng.chance(Math.min(0.35, 0.08 * k))) os.push({ kind: 'mine', s: rng.f(s0, s1), x: rng.f(-6, 6) });
+        if (rng.chance(0.35)) {
+          const x = rng.f(-4.5, 4.5);
+          const s = rng.f(s0, s1 - 15);
+          for (let i = 0; i < 5; i++) ps.push({ s: s + i * 3, x, kind: 'cash' });
+        } else if (rng.chance(0.4)) ps.push({ s: rng.f(s0, s1), x: rng.f(-5, 5), kind: rng.pick(['wood', 'metal', 'cloth', 'ammo', 'metal']) });
+      }
+      if (s0 >= this.nextFuelS) {
+        this.nextFuelS += rng.f(300, 420);
+        ps.push({ s: s0 + 20, x: rng.f(-4, 4), kind: 'fuel' });
+      }
+      if (s0 >= this.nextAmmoS) {
+        this.nextAmmoS += rng.f(220, 320);
+        ps.push({ s: s0 + 10, x: rng.f(-4, 4), kind: 'ammo' });
+      }
+      if (s0 >= this.nextRepairS) {
+        this.nextRepairS += rng.f(800, 1000);
+        ps.push({ s: s0 + 30, x: rng.f(-4, 4), kind: 'repair' });
+      }
+      const bySort = (a, b) => a.s - b.s;
+      P.zombies.push(...zs.sort(bySort));
+      P.pickups.push(...ps.sort(bySort));
+      P.obstacles.push(...os.sort(bySort));
+    }
+    // уже появившиеся записи больше не нужны
+    for (const key of ['zombies', 'pickups', 'obstacles']) {
+      if (this.idx[key] > 400) {
+        P[key].splice(0, this.idx[key]);
+        this.idx[key] = 0;
+      }
+    }
+    // босс каждые ~2 км
+    const b = this.boss;
+    if ((!b || b.dead || b.gone) && c.s > this.nextBossS - 150) {
+      const types = ['tank', 'queen', 'butcher'];
+      const z = this.spawnZombie({ s: this.nextBossS, x: 0, type: types[Math.floor(this.nextBossS / 2000) % 3] });
+      this.nextBossS += 2200;
+      if (z) {
+        this.boss = z;
+        this.notice(`Босс: ${z.T.name}!`, 3, 'bad');
+        sfx.alarm();
+        sfx.groan();
+      }
+    }
   }
 
   // ------------------------------ вступление ------------------------------
@@ -562,12 +766,13 @@ export class Level {
     const tr = this.track;
 
     // скорость
-    const off = Math.abs(c.x) > ROAD_HALF + 0.6;
+    const off = tr.roadDist(c.s, c.x) > 0.6 && !c.air;
     let maxV = st.speed * (off ? 0.7 : 1) * (c.slowT > 0 ? 0.6 : 1);
     if (inp.gas) maxV *= 1.08;
     if (c.fuel <= 0) maxV = 0;
     if (c.grabT > 0) maxV *= 0.75;
-    if (inp.brake) c.v = Math.max(0, c.v - 16 * dt);
+    if (c.air) c.v = Math.max(0, c.v - 0.4 * dt);
+    else if (inp.brake) c.v = Math.max(0, c.v - 16 * dt);
     else if (c.v < maxV) c.v = Math.min(maxV, c.v + (2.2 + (maxV - c.v) * 0.35) * dt);
     else c.v = Math.max(maxV, c.v - 6 * dt);
     c.slowT = Math.max(0, c.slowT - dt);
@@ -575,8 +780,23 @@ export class Level {
 
     if (this.autopilot) this.autoSteer();
     // руль
-    const target = clamp(inp.steer, -1, 1) * 0.36 * (0.75 + 0.25 * st.handling);
-    c.ang = damp(c.ang, target, 4.5 * st.handling, dt);
+    // дрифт: машину заносит, кузов разворачивает боком, скорость немного падает
+    const drifting = inp.drift && c.v > 9 && Math.abs(inp.steer) > 0.1 && !c.air;
+    const grip = this.params.slippery || 1;
+    const target = c.air ? c.ang : clamp(inp.steer, -1, 1) * (drifting ? 0.5 : 0.36) * (0.75 + 0.25 * st.handling);
+    c.ang = damp(c.ang, target, (drifting ? 3 : 4.5) * st.handling * grip, dt);
+    c.drift = damp(c.drift || 0, drifting ? clamp(inp.steer, -1, 1) * 0.6 : 0, drifting ? 3.5 : 5, dt);
+    if (drifting) {
+      c.v = Math.max(8, c.v - 2.2 * dt);
+      this.driftTime = (this.driftTime || 0) + dt;
+      if (Math.random() < 0.8) {
+        for (const sx of [-1, 1]) this.fx.dust(this.carModel.group.localToWorld(new THREE.Vector3(sx * 0.8, 0.2, this.carModel.rearZ + 0.6)), { x: 0, y: 0.6, z: 0 }, 1, '#d8d4cc');
+      }
+      if (!this._skid || this.t - this._skid > 0.35) {
+        this._skid = this.t;
+        sfx.skid();
+      }
+    }
     const ds = c.v * Math.cos(c.ang) * dt;
     c.s += ds;
     c.x += c.v * Math.sin(c.ang) * dt;
@@ -590,16 +810,43 @@ export class Level {
     }
     if (c.fuel <= 0 && c.v < 0.3 && this.state === 'drive') this.fail('fuel');
 
-    // границы дороги
-    const lim = tr.onBridge(c.s) ? ROAD_HALF - 0.9 : 12.5;
-    if (Math.abs(c.x) > lim) {
-      c.x = Math.sign(c.x) * lim;
-      c.ang *= -0.25;
+    // границы дороги (на развилке — островок между ветками)
+    let lo = -12.5;
+    let hi = 12.5;
+    const fo = tr.laneOff(c.s);
+    if (tr.onBridge(c.s)) {
+      lo = -(ROAD_HALF - 0.9);
+      hi = ROAD_HALF - 0.9;
+    } else if (fo > 0) {
+      hi = fo + tr.laneHalf(fo) + 5.5;
+      lo = -hi;
+      const inner = fo - tr.laneHalf(fo) - 1.0;
+      if (inner > 0.2) {
+        if (c.x >= 0) lo = inner;
+        else hi = -inner;
+      }
+    }
+    if (c.x < lo || c.x > hi) {
+      const side = c.x > hi ? 1 : -1;
+      c.x = clamp(c.x, lo, hi);
+      if (Math.sign(c.ang) === side) c.ang *= -0.25;
       c.v *= 0.985;
       if (tr.onBridge(c.s)) {
-        this.fx.sparks(this.wpos(c.s + 1, c.x + Math.sign(c.x) * 1, 0.6), 2);
+        this.fx.sparks(this.wpos(c.s + 1, c.x + side * 1, 0.6), 2);
         if (Math.random() < 0.1) sfx.hit();
       }
+    }
+    // подсказки: развилка и трамплин впереди
+    const fk = tr.forkAt(c.s + 120);
+    if (fk && this.warnedFork !== fk) {
+      this.warnedFork = fk;
+      this.notice(fk.side > 0 ? 'Развилка: держись ПРАВЕЕ ➜' : '⬅ Развилка: держись ЛЕВЕЕ', 3.5);
+      sfx.alarm();
+    }
+    const rp = tr.ramps.find((r) => r.s - c.s > 0 && r.s - c.s < 90);
+    if (rp && this.warnedRamp !== rp) {
+      this.warnedRamp = rp;
+      this.notice('Трамплин! Разгонись посильнее', 2.5);
     }
     if (off && c.v > 5) {
       c.bumpV += (Math.random() - 0.5) * c.v * 0.05;
@@ -623,6 +870,10 @@ export class Level {
     this.driveCamera(dt);
 
     // сюжетные точки
+    if (this.arcade) {
+      if (c.hp <= 0) this.carDestroyed();
+      return;
+    }
     const S = this.station.s;
     if (!this.stationDone) {
       if (c.s > S - 160 && !this.warned.st) {
@@ -660,7 +911,9 @@ export class Level {
       const pk = this.pickups.find((p) => p.alive && p.s - c.s > 8 && p.s - c.s < 40);
       if (pk) want = pk.x;
     }
-    want = clamp(want, -6, 6);
+    const base = this.track.routeX(c.s + 18);
+    if (!block && base !== 0) want = base;
+    want = clamp(want, base - 5, base + 5);
     this.input.steer = clamp((want - c.x) * 0.5, -1, 1);
     this.input.fire = true;
     if (c.hp < c.maxHp * 0.35) this.useRepair();
@@ -671,10 +924,38 @@ export class Level {
     const tr = this.track;
     tr.frame(c.s, _fr);
     const g = this.carModel.group;
-    const y = tr.height(c.s, c.x);
+    const gy = tr.height(c.s, c.x);
+    const G = 22;
+    if (this.state === 'drive' && dt > 0) {
+      if (c.air) {
+        c.vy -= G * dt;
+        c.y += c.vy * dt;
+        c.airT += dt;
+        if (c.y <= gy) this.land(gy);
+      } else {
+        const pred = c.y + (c.gvy || 0) * dt - 0.5 * G * dt * dt;
+        if ((c.gvy || 0) > 2 && c.v > 6 && gy < pred - 0.05) {
+          // земля ушла из-под колёс — летим
+          c.air = true;
+          c.airT = 0;
+          c.vy = c.gvy - G * dt;
+          c.y = pred;
+        } else {
+          // скорость земли по вертикали (не больше, чем даёт уклон трамплина)
+          const cap = Math.max(1, c.v * 0.35);
+          c.gvy = Math.abs(gy - c.y) > 2 ? 0 : clamp((gy - c.y) / dt, -cap, cap);
+          c.y = gy;
+        }
+      }
+    } else {
+      c.air = false;
+      c.gvy = 0;
+      c.y = gy;
+    }
+    const y = c.y;
     this.wpos(c.s, c.x, 0, g.position);
     g.position.y = y;
-    const yaw = _fr.yaw - c.ang;
+    const yaw = _fr.yaw - c.ang - (c.drift || 0);
     c.yaw = yaw;
     g.rotation.set(0, yaw, 0);
     // подвеска
@@ -682,9 +963,35 @@ export class Level {
     c.bump += c.bumpV * dt;
     const b = this.carModel.body;
     b.position.y = c.bump * 0.5;
-    c.pitch = damp(c.pitch, -Math.atan(_fr.slope) + c.bump * 0.3, 6, dt);
+    if (c.air) c.pitch = damp(c.pitch, -Math.atan2(c.vy, Math.max(8, c.v)) * 0.6, 3, dt);
+    else c.pitch = damp(c.pitch, -Math.atan(_fr.slope) + c.bump * 0.3, 6, dt);
     c.roll = damp(c.roll, -c.ang * c.v * 0.012, 5, dt);
     b.rotation.set(c.pitch, 0, c.roll);
+  }
+
+  // Приземление после прыжка
+  land(gy) {
+    const c = this.car;
+    const impact = -c.vy;
+    c.air = false;
+    c.y = gy;
+    c.vy = 0;
+    c.gvy = 0;
+    if (impact > 4) {
+      c.bumpV -= Math.min(9, impact * 0.55);
+      this.shake = Math.max(this.shake, Math.min(0.7, impact * 0.045));
+      sfx.landing();
+      for (let i = 0; i < 6; i++) this.fx.dust(this.wpos(c.s + (Math.random() - 0.5) * 3, c.x + (Math.random() - 0.5) * 2, 0.2), { x: (Math.random() - 0.5) * 3, y: 1.2, z: 0 }, 1.2, '#b8b0a0');
+      if (impact > 14) this.damageCar((impact - 14) * 2.5, true);
+    }
+    if (c.airT > 0.45) {
+      // награда за прыжок
+      const bonus = Math.round(20 + c.airT * 40);
+      this.stats.cash += bonus;
+      this.stats.jumps = (this.stats.jumps || 0) + 1;
+      this.notice(`Прыжок! +${bonus}`, 1.6);
+      sfx.coin();
+    }
   }
 
   driveCamera(dt) {
@@ -734,6 +1041,15 @@ export class Level {
     const hl = spec.L / 2;
     const hw = spec.W / 2;
     const st = this.o.stats;
+    // высоко в прыжке машина пролетает над зомби и препятствиями
+    const hAir = c.air ? c.y - this.track.height(c.s, c.x) : 0;
+    if (hAir > 1.0) {
+      for (const p of this.pickups) {
+        if (!p.alive || Math.abs(p.s - c.s) > hl + 1.2 || Math.abs(p.x - c.x) > hw + 1.2) continue;
+        if (Math.abs((p.dy || 0) - hAir) < 2.4) this.collect(p);
+      }
+      return;
+    }
     // зомби и бандиты
     let latched = 0;
     for (const z of this.zombies) if (z.latch && !z.dead) latched++;
@@ -861,7 +1177,7 @@ export class Level {
       if (!p.alive) continue;
       const ds = p.s - c.s;
       const dx = p.x - c.x;
-      if (Math.abs(ds) < hl + 1.2 && Math.abs(dx) < hw + 1.2) this.collect(p);
+      if (Math.abs(ds) < hl + 1.2 && Math.abs(dx) < hw + 1.2 && (p.dy || 0) - hAir < 2.2) this.collect(p);
     }
     // турели не таранятся, но их можно объехать
     void dt;
@@ -1427,6 +1743,7 @@ export class Level {
       const rig = z.slot.rig;
       // выгрузка позади
       if (z.s < tS - 60 && !(z.type === 'bandit' && z.s > tS - 90)) {
+        z.gone = true;
         humans.free(z.slot);
         this.zombies.splice(i, 1);
         continue;
@@ -1775,7 +2092,7 @@ export class Level {
       p.bob += dt;
       const it = p.mesh.userData.item;
       it.rotation.y += dt * 2;
-      it.position.y = 0.9 + Math.sin(p.bob * 3) * 0.15;
+      it.position.y = 0.9 + (p.dy || 0) + Math.sin(p.bob * 3) * 0.15;
       if (p.s < tS - 40) {
         p.alive = false;
         this.scene.remove(p.mesh);
@@ -2347,21 +2664,32 @@ export class Level {
       if (this.pumpProgress < 1) objective = this.nearPump ? `Заправка: ${Math.round(this.pumpProgress * 100)}%` : `Подойди к колонке · ${Math.round(this.goalDist || 0)} м`;
       else objective = `Вернись в машину · ${Math.round(this.goalDist || 0)} м`;
     }
+    let distText = null;
+    let progress = clamp(c.s / this.L, 0, 1);
+    let killGoal = this.params.killGoal;
+    if (this.arcade) {
+      const d = this.stats.distance;
+      objective = `Аркада · рекорд ${(this.o.arcadeBest / 1000 || 0).toFixed(2)} км`;
+      distText = `${(d / 1000).toFixed(2)} км`;
+      progress = this.o.arcadeBest > 0 ? clamp(d / this.o.arcadeBest, 0, 1) : clamp((d % 1000) / 1000, 0, 1);
+      killGoal = Math.max(25, Math.ceil((this.stats.kills + 1) / 25) * 25);
+    }
     return {
+      distText,
       state: this.state,
       hp: c.hp,
       maxHp: c.maxHp,
       fuel: c.fuel,
       maxFuel: c.maxFuel,
-      speed: c.v,
+      speed: Math.abs(c.v),
       mag: this.state === 'foot' ? this.gun.mag : w.mag,
       magMax: this.state === 'foot' ? this.o.gun.mag : w.def.mag,
       reserve: this.state === 'foot' ? '∞' : w.reserve,
       reloading: this.state === 'foot' ? this.gun.reload > 0 : w.reload > 0,
       melee: this.o.gun.cat === 'melee',
       kills: this.stats.kills,
-      killGoal: this.params.killGoal,
-      progress: clamp(c.s / this.L, 0, 1),
+      killGoal,
+      progress,
       distLeft: Math.max(0, Math.round(this.L - c.s)),
       objective,
       notices: this.notices,
@@ -2420,16 +2748,32 @@ export class Level {
       return [r + u2 * scale, r - v2 * scale];
     };
     ctx.strokeStyle = 'rgba(160,160,150,0.9)';
-    ctx.lineWidth = ROAD_HALF * 2 * scale;
     ctx.lineCap = 'round';
-    ctx.beginPath();
+    ctx.lineJoin = 'round';
     const span = r / scale + 10;
-    for (let s = cs - span; s <= cs + span; s += 4) {
-      const [x, y] = toMap(s, 0);
-      if (s === cs - span) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    const hasFork = tr.forks.some((f) => f.s1 > cs - span && f.s0 < cs + span);
+    // дорога; на развилке — две ветки и жёлтая линия маршрута по правильной
+    for (const sd of hasFork ? [-1, 1] : [1]) {
+      ctx.lineWidth = (hasFork ? BRANCH_HALF : ROAD_HALF) * 2 * scale;
+      ctx.beginPath();
+      for (let s = cs - span; s <= cs + span; s += 4) {
+        const [x, y] = toMap(s, sd * tr.laneOff(s));
+        if (s === cs - span) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
+    if (hasFork) {
+      ctx.strokeStyle = '#ffd21a';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (let s = cs - span; s <= cs + span; s += 4) {
+        const [x, y] = toMap(s, tr.routeX(s));
+        if (s === cs - span) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
     // объекты
     const dot = (s, x, col, rad = 3) => {
       if (Math.abs(s - cs) > span) return;
@@ -2445,7 +2789,8 @@ export class Level {
     for (const t of this.turrets) if (!t.dead) dot(t.s, t.x, '#ff8a2a', 4);
     if (!this.stationDone) dot(this.station.s, -20, '#3aa0ff', 6);
     if (p) for (const pp of this.station.pumps) dot(pp.s, pp.x, '#3aa0ff', 3);
-    dot(this.L, 0, '#ffd21a', 6);
+    if (!this.arcade) dot(this.L, 0, '#ffd21a', 6);
+    else if (this.boss && !this.boss.dead && !this.boss.gone) dot(this.boss.s, this.boss.x, '#ff2a2a', 6);
     if (p) dot(c.s, c.x, '#ffffff', 4);
     ctx.restore();
     // стрелка
@@ -2481,6 +2826,7 @@ export class Level {
       used: { repair: this.usedRepair || 0, fuel: this.usedFuel || 0, meds: this.usedMeds || {} },
       xp: 40 + st.kills * 2 + st.bandits * 4 + (st.bosses || 0) * 50,
       bosses: st.bosses || 0,
+      jumps: st.jumps || 0,
       bossCash: this.bossKilled ? this.params.bossReward.cash : 0,
       bossGold: this.bossKilled ? this.params.bossReward.gold : 0,
     };

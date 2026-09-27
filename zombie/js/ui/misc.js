@@ -330,7 +330,7 @@ export function settingsScreen(app) {
       'div',
       { class: 'set-row' },
       h('span', {}, 'Управление'),
-      h('span', { style: { color: 'var(--muted)', fontSize: '0.95rem', textAlign: 'right' } }, 'A/D — руль, W — газ, S — тормоз, Пробел — огонь, C — камера'),
+      h('span', { style: { color: 'var(--muted)', fontSize: '0.95rem', textAlign: 'right' } }, 'A/D — руль, W — газ, S — тормоз, C — дрифт, Пробел — огонь, V — камера'),
     ),
     h(
       'div',

@@ -5,14 +5,14 @@ import { GeoBuilder, vcMat, geoMesh, matsFor } from '../engine/geo.js';
 import { Rng, damp, fbm } from '../engine/util.js';
 import { concreteTex, garageFloorTex, textTex, metalSheetTex, groundTex } from '../engine/textures.js';
 import { makeSky, makeMountains, makeLights } from './env.js';
-import { CarModel } from './cars.js';
+import { CarModel, setInsideView } from './cars.js';
 import * as P from './props.js';
 import { BIOMES } from '../data/catalog.js';
 
 // ------------------------------ главное меню: база снаружи ------------------------------
 
 export class MenuScene {
-  constructor(biomeKey, quality, baseName) {
+  constructor(biomeKey, quality, baseName, variant = 0) {
     this.biomeKey = biomeKey;
     const biome = BIOMES[biomeKey];
     const scene = (this.scene = new THREE.Scene());
@@ -60,7 +60,7 @@ export class MenuScene {
     scene.add(geoMesh(road.build()));
 
     // база
-    const base = geoMesh(P.baseModel('#2f5f9e').build());
+    const base = geoMesh(P.baseModel('#2f5f9e', variant).build());
     base.castShadow = true;
     base.receiveShadow = true;
     scene.add(base);
@@ -72,6 +72,10 @@ export class MenuScene {
     r.position.x = P.BASE.gateHalf;
     r.rotation.y = Math.PI - 1.5;
     scene.add(l, r);
+    // флаг базы
+    this.flag = new P.Flag('#2f5f9e', (baseName || '1').replace(/\D+/g, '') || '1');
+    this.flag.mesh.position.set(-7.94, 8.2, -8);
+    scene.add(this.flag.mesh);
     // название базы на воротах
     const nameSign = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.62), new THREE.MeshBasicMaterial({ map: textTex((baseName || 'База 1').toUpperCase(), { color: '#f2c21b', size: 84 }), transparent: true }));
     nameSign.position.set(0, 5.2, 0.37);
@@ -106,7 +110,7 @@ export class MenuScene {
     scm.receiveShadow = true;
     scene.add(scm);
 
-    this.carPos = new THREE.Vector3(0, 0, 13);
+    this.carPos = new THREE.Vector3(0, 0.06, 13);
     this.car = null;
     this.t = 0;
   }
@@ -131,6 +135,7 @@ export class MenuScene {
 
   update(dt) {
     this.t += dt;
+    this.flag?.update(dt);
     const a = Math.sin(this.t * 0.08) * 0.18;
     const portrait = this.camera.aspect < 1;
     const d = portrait ? 15 : 10.5;
@@ -276,6 +281,13 @@ export class GarageScene {
     this.flicker = 0;
     this.focus = 'car';
     this.t = 0;
+    this.cabin = false;
+    this.cabK = 0;
+    this.cabYaw = 0;
+    this.cabPitch = 0;
+    this._look = new THREE.Vector3();
+    this._eye = new THREE.Vector3();
+    this._tgt = new THREE.Vector3();
   }
 
   setCar(def, equip, weaponModel) {
@@ -305,7 +317,8 @@ export class GarageScene {
 
   update(dt) {
     this.t += dt;
-    const idle = this.t - (this.lastTouch || -99) > 3;
+    const idle = !this.paintMode && !this.cabin && this.t - (this.lastTouch || -99) > 3;
+    this.car?.update(dt, 0, 0);
     if (!this.drag) {
       // инерция после броска, затем медленное автовращение
       this.rotV = damp(this.rotV, idle ? 0.12 : 0, idle ? 0.8 : 2.5, dt);
@@ -330,15 +343,64 @@ export class GarageScene {
     const el = this.pitch ?? 0.2;
     const ty = 0.9;
     this.camera.position.set(off - 0.3 + Math.sin(0.55) * d * Math.cos(el), ty + Math.sin(el) * d, Math.cos(0.55) * d * Math.cos(el));
-    this.camera.lookAt(off - 0.3, ty, 0);
+    this._look.set(off - 0.3, ty, 0);
+    // вид из салона (категория «Салон»): плавный переход внутрь машины
+    this.cabK = damp(this.cabK, this.cabin ? 1 : 0, 5, dt);
+    if (this.cabK > 0.001 && this.car) {
+      const c = this.car;
+      const dr = c.driver;
+      c.group.updateMatrixWorld(true);
+      const eye = this._eye.set(dr.x * 0.4, dr.y + 0.04, dr.z - 0.06).applyMatrix4(c.group.matrixWorld);
+      const yaw = this.cabYaw;
+      const tgt = this._tgt.set(dr.x * 0.4 + Math.sin(yaw) * 2, dr.y - 0.34 + this.cabPitch * 2, dr.z - 0.06 + Math.cos(yaw) * 2).applyMatrix4(c.group.matrixWorld);
+      const k = this.cabK * this.cabK * (3 - 2 * this.cabK);
+      this.camera.position.lerp(eye, k);
+      this._look.lerp(tgt, k);
+    }
+    const fov = (this.portrait ? 60 : 38) + (this.portrait ? 18 : 34) * this.cabK;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.camera.lookAt(this._look);
+  }
+
+  setCabin(on) {
+    this.cabin = on;
+    this.cabYaw = 0;
+    this.cabPitch = 0;
+    if (this._inside !== on) {
+      this._inside = on;
+      setInsideView(on);
+    }
   }
 
   // Вращение мышью/пальцем: dx — по горизонтали (поворот машины), dy — наклон камеры
   onDrag(dx, dy = 0) {
     this.lastTouch = this.t;
+    if (this.cabin) {
+      this.cabYaw = Math.max(-1.2, Math.min(1.2, this.cabYaw - dx * 0.005));
+      this.cabPitch = Math.max(-0.4, Math.min(0.4, this.cabPitch - dy * 0.004));
+      return;
+    }
     this.rot += dx * 0.01;
     this.rotV = dx * 0.6;
     this.pitch = Math.min(0.75, Math.max(0.02, (this.pitch ?? 0.2) + dy * 0.004));
+  }
+
+  // Баллончик: точка на кузове под курсором (nx, ny — от -1 до 1) → координаты развёртки
+  paintHit(nx, ny) {
+    if (!this.car) return null;
+    this._ray ||= new THREE.Raycaster();
+    this._ray.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
+    this.turn.updateMatrixWorld(true);
+    const hits = this._ray.intersectObject(this.car.group, true);
+    for (const hit of hits) {
+      if (hit.object.material?.transparent) continue;
+      if ((hit.object !== this.car.bodyMesh && hit.object !== this.car.armorMesh) || !hit.uv1) return null;
+      return hit.uv1;
+    }
+    return null;
   }
 
   onZoom(f) {

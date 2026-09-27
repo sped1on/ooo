@@ -1,12 +1,12 @@
 // 3D-превью предметов для магазинов: модель рендерится в текстуру и сохраняется как картинка.
 
 import * as THREE from 'three';
-import { CarModel, buildBumper, buildGrille, buildWheel, buildCarWeapon, SPECS } from '../world/cars.js';
+import { CarModel, buildBumper, buildGrille, buildWheel, buildCarWeapon, SPECS, steerGeo, hangGeo, dashItem, MAT } from '../world/cars.js';
 import { buildGun, vestGeo, helmetGeo, medkitGeo } from '../world/guns.js';
 import { makePickup } from '../game/pickups.js';
 import { findCar, ARMOR, MEDKITS } from '../data/catalog.js';
 import * as P from '../world/props.js';
-import { vcMat, geoMesh, matsFor } from '../engine/geo.js';
+import { vcMat, geoMesh, matsFor, GeoBuilder } from '../engine/geo.js';
 
 const W = 320;
 const H = 220;
@@ -82,6 +82,32 @@ function build(key) {
       const m = new CarModel(findCar(extra), { paint: id });
       return [m.group, { az: 0.85, el: 0.22 }];
     }
+    case 'armor': {
+      const m = new CarModel(findCar(extra || 'rusty'), { armor: id });
+      return [m.group, { az: 1.05, el: 0.22 }];
+    }
+    case 'steer': {
+      const m = new THREE.Mesh(steerGeo(id), MAT.trim());
+      const g = new THREE.Group();
+      g.add(m);
+      m.scale.set(1, 1, 0.3);
+      return [g, { az: Math.PI + 0.35, el: 0.15, fill: 1.05 }];
+    }
+    case 'hang': {
+      const geo = hangGeo(id);
+      const g = new THREE.Group();
+      if (geo) g.add(new THREE.Mesh(geo, MAT.inside()));
+      else g.add(noneMark());
+      return [g, { az: 0.35, el: 0.1 }];
+    }
+    case 'dash': {
+      const g = dashItem(id) || (() => {
+        const e = new THREE.Group();
+        e.add(noneMark());
+        return e;
+      })();
+      return [g, { az: Math.PI + 0.6, el: 0.25 }];
+    }
     case 'bumper': {
       const spec = SPECS.pickup;
       const g = buildBumper(id, spec) || new THREE.Group();
@@ -122,6 +148,18 @@ function build(key) {
       g.children[1].visible = false;
       return [g, { az: 0.6, el: 0.35 }];
     }
+    case 'spraycan': {
+      const b = new GeoBuilder();
+      b.cyl(0.1, 0.1, 0.42, 20, '#d8261e', { y: 0.21 });
+      b.cyl(0.101, 0.101, 0.12, 20, '#f2f2f2', { y: 0.2 });
+      b.cyl(0.085, 0.1, 0.06, 20, '#b8bcc2', { y: 0.45 });
+      b.cyl(0.03, 0.03, 0.05, 10, '#e8e8e8', { y: 0.5 });
+      b.box(0.03, 0.03, 0.03, '#1a1a1a', { y: 0.53, z: 0.02 });
+      b.cyl(0.102, 0.102, 0.02, 20, '#9a9ea4', { y: 0.01 });
+      for (const [c, x] of [['#2aa8e8', -0.05], ['#f2d21b', 0], ['#6ad84a', 0.05]]) b.box(0.035, 0.035, 0.02, c, { x, y: 0.2, z: 0.1 });
+      const m = new THREE.Mesh(b.build(), vcMat());
+      return [m, { az: 0.4, el: 0.2 }];
+    }
     case 'crate': {
       const m = geoMesh(P.crate(0).build());
       return [m, { az: 0.6, el: 0.35 }];
@@ -129,6 +167,17 @@ function build(key) {
     default:
       return [new THREE.Group(), {}];
   }
+}
+
+// Перечёркнутый круг для «ничего не выбрано»
+function noneMark() {
+  const m = new THREE.MeshBasicMaterial({ color: 0x8a94a4, side: THREE.DoubleSide });
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.014, 6, 28), m));
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.026, 0.02), m);
+  bar.rotation.z = Math.PI / 4;
+  g.add(bar);
+  return g;
 }
 
 // Возвращает картинку сразу (если есть) или ставит в очередь и вызывает cb
