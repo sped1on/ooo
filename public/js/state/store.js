@@ -11,6 +11,7 @@ const DEFAULTS = {
   equipped: { ...DEFAULT_SKINS },
   lastBonus: 0,
   updated: 0,
+  bgStars: true,
   stats: { played: 0, wins: 0 },
   lessons: { koridor: { novice: 1, skilled: 1 }, chess: { novice: 1, skilled: 1 }, checkers: { novice: 1, skilled: 1 } },
   prefs: {
@@ -44,6 +45,10 @@ function sanitizeSkins(st) {
 }
 
 function merge(raw) {
+  // Звёздное небо стало фоном по умолчанию — один раз включаем его и тем,
+  // у кого стоял прежний стандартный фон
+  if (!raw.bgStars && raw.equipped?.background === 'c-night') raw.equipped.background = 'stars';
+  raw.bgStars = true;
   return sanitizeSkins({
     ...structuredClone(DEFAULTS),
     ...raw,

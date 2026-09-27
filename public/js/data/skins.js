@@ -172,6 +172,7 @@ const FINISH_SKINS = [
 const bgColor = (id, name, c, c2) => ({ id, name, plain: true, r: 'backdrop', p: { c, c2 }, particles: 'dust', accent: c });
 
 const BG_COLORS = [
+  { id: 'stars', name: 'Звёздное небо', plain: true, r: 'space', p: { c: '#070a24', c2: '#6b2ad8', c3: '#1c4ad8' }, particles: 'stars', accent: '#6b4dff' },
   bgColor('c-night', 'Ночь', '#16213d', '#060912'),
   bgColor('c-dark', 'Тёмный', '#1a1b20', '#050506'),
   bgColor('c-light', 'Светлый', '#8792a6', '#3a4150'),
@@ -181,7 +182,6 @@ const BG_COLORS = [
 ];
 
 const BG_SKINS = [
-  { id: 'stars', name: 'Звёздное небо', price: 200, r: 'space', p: { c: '#070a24', c2: '#6b2ad8', c3: '#1c4ad8' }, particles: 'stars', accent: '#6b4dff' },
   { id: 'waves', name: 'Цветные волны', price: 250, r: 'waves', p: {}, particles: 'sparks', accent: '#ff3ccf' },
   { id: 'digital', name: 'Цифровой', price: 250, r: 'digital', p: {}, particles: 'digital', accent: '#22c7ff' },
   { id: 'flame', name: 'Пламя', price: 250, r: 'flame', p: {}, particles: 'embers', accent: '#ff6a1a', dim: 0.55 },
@@ -284,7 +284,7 @@ export const GAME_SKIN_KINDS = {
   checkers: ['board8', 'checkersPieces', 'background'],
 };
 
-export const DEFAULT_SKINS = { field: 'c-graphite', walls: 'c-grey', pawns: 'c-player', finish: 'c-player', background: 'c-night', board8: 'c-wood', chessPieces: 'c-classic', checkersPieces: 'c-classic' };
+export const DEFAULT_SKINS = { field: 'c-graphite', walls: 'c-grey', pawns: 'c-player', finish: 'c-player', background: 'stars', board8: 'c-wood', chessPieces: 'c-classic', checkersPieces: 'c-classic' };
 
 export function findSkin(kind, id) {
   const k = SKIN_KINDS[kind];

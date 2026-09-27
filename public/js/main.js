@@ -1,7 +1,9 @@
 // Точка входа: загрузка, меню, магазин, правила, настройки и запуск партий.
 
 import { Game, BOARD_SIZES, WALLS_BY_SIZE } from './core/quoridor.js';
-import { BOT_LEVELS } from './core/ai.js';
+import { BOT_LEVELS, chooseBotMove } from './core/ai.js';
+import { chooseMove8 } from './core/ai8.js';
+import { Checkers } from './core/checkers.js';
 import { BoardView } from './render/board3d.js';
 import { skinThumb, setThumb, hasThumb } from './render/thumbs.js';
 import { applyBackground } from './render/backdrop.js';
@@ -1183,7 +1185,7 @@ async function connectOnlineSilently() {
 }
 
 // Для автотестов и отладки
-window.__koridor = { get match() { return match; }, get view() { return view; }, get view8() { return view8; }, setGame };
+window.__koridor = { get match() { return match; }, get view() { return view; }, get view8() { return view8; }, setGame, setView, startMatch, openWheel, chooseBotMove, chooseMove8, Checkers };
 
 // Кнопки не держат фокус: иначе пробел/Enter в игре «нажимали» бы их повторно
 document.addEventListener('pointerup', (e) => {
