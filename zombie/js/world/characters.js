@@ -29,7 +29,24 @@ function partGeos() {
   gun.box(0.06, 0.1, 0.62, '#2a2c30', { z: 0.2 });
   gun.box(0.05, 0.14, 0.06, '#1a1a1a', { y: -0.1, z: 0.16 });
   gun.cyl(0.018, 0.018, 0.3, 6, '#1a1a1a', { z: 0.6, rx: Math.PI / 2 });
+  const helmet = new GeoBuilder();
+  helmet.add(new THREE.SphereGeometry(0.19, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), '#4a5236', { sy: 0.85 });
+  helmet.cyl(0.2, 0.2, 0.03, 10, '#3a4028');
+  const vest = new GeoBuilder();
+  vest.box(0.52, 0.5, 0.32, '#3a3e36', {});
+  vest.box(0.4, 0.14, 0.06, '#2a2c28', { y: -0.1, z: 0.17 });
+  vest.box(0.14, 0.12, 0.06, '#d8d0b0', { x: 0.12, y: 0.12, z: 0.17 });
+  const cap = new GeoBuilder();
+  cap.cyl(0.155, 0.16, 0.1, 10, '#ffffff', {});
+  cap.box(0.2, 0.02, 0.14, '#ffffff', { y: -0.04, z: 0.18 });
+  const belly = new GeoBuilder();
+  belly.ico(0.36, 1, '#ffffff', { sy: 0.9 });
+  for (let i = 0; i < 6; i++) belly.ico(0.08, 0, '#d8f060', { x: Math.cos(i) * 0.3, y: Math.sin(i * 2) * 0.2, z: 0.2 + (i % 2) * 0.05 });
   return {
+    helmet: helmet.build(),
+    vest: vest.build(),
+    cap: cap.build(),
+    belly: belly.build(),
     leg: leg.build(),
     torso: torso.build(),
     head: head.build(),
@@ -45,23 +62,33 @@ export function humanGeos() {
   return GEOS;
 }
 
+// Виды зомби. armor — доля урона от пуль, которую поглощает броня.
 export const ZTYPES = {
-  walker: { hp: 40, speed: 1.4, scale: 1, dmg: 6, skin: ['#7f9a6a', '#8aa070', '#6f8a60'], eyes: '#ff3a1a', mass: 1 },
-  runner: { hp: 28, speed: 4.4, scale: 0.95, dmg: 5, skin: ['#9aa88a', '#a0a890'], eyes: '#ffb01a', mass: 0.8, thin: true },
-  brute: { hp: 220, speed: 1.2, scale: 1.55, dmg: 18, skin: ['#6a7a5a', '#5f6f52'], eyes: '#ff1a1a', mass: 3, bare: true },
-  toxic: { hp: 55, speed: 1.7, scale: 1.05, dmg: 7, skin: ['#8ad13a', '#7ac02a'], eyes: '#e8ff4a', mass: 1.1, toxic: true },
-  bandit: { hp: 70, speed: 2.6, scale: 1, dmg: 8, skin: ['#c89a7a', '#b8886a', '#d0a888'], eyes: null, mass: 1.1, human: true },
+  walker: { name: 'Ходок', hp: 40, speed: 1.4, scale: 1, dmg: 6, skin: ['#7f9a6a', '#8aa070', '#6f8a60', '#9aa08a'], eyes: '#ff3a1a', mass: 1, cap: 0.25 },
+  runner: { name: 'Бегун', hp: 28, speed: 4.6, scale: 0.95, dmg: 5, skin: ['#9aa88a', '#a0a890', '#b0a898'], eyes: '#ffb01a', mass: 0.8, thin: true },
+  crawler: { name: 'Ползун', hp: 30, speed: 1.0, scale: 1, dmg: 5, skin: ['#8a8a70', '#7a8a6a'], eyes: '#ff3a1a', mass: 0.7, crawl: true },
+  brute: { name: 'Громила', hp: 220, speed: 1.25, scale: 1.55, dmg: 18, skin: ['#6a7a5a', '#5f6f52'], eyes: '#ff1a1a', mass: 3, bare: true },
+  armored: { name: 'Бронированный', hp: 90, speed: 1.4, scale: 1.05, dmg: 9, skin: ['#8a9478', '#7a8a6a'], eyes: '#ff5a1a', mass: 1.4, armor: 0.55, helmet: true, vest: true },
+  spitter: { name: 'Плевун', hp: 50, speed: 1.3, scale: 1.0, dmg: 7, skin: ['#8ad13a', '#7ac02a'], eyes: '#e8ff4a', mass: 1, toxic: true, spit: true },
+  exploder: { name: 'Взрывной', hp: 35, speed: 1.9, scale: 1.1, dmg: 22, skin: ['#b8a060', '#a89050'], eyes: '#ff8a1a', mass: 1.3, belly: true, explode: true },
+  bandit: { name: 'Бандит', hp: 70, speed: 2.6, scale: 1, dmg: 8, skin: ['#c89a7a', '#b8886a', '#d0a888'], eyes: null, mass: 1.1, human: true, cap: 0.5 },
+  // боссы
+  tank: { name: 'Танк', hp: 600, speed: 1.6, scale: 2.7, dmg: 22, skin: ['#5a6a4a'], eyes: '#ff1a1a', mass: 12, bare: true, boss: true, armor: 0.2 },
+  queen: { name: 'Королева заразы', hp: 450, speed: 1.1, scale: 2.3, dmg: 14, skin: ['#9ad13a'], eyes: '#f0ff4a', mass: 8, toxic: true, spit: true, boss: true, belly: true },
+  butcher: { name: 'Мясник', hp: 500, speed: 3.4, scale: 2.1, dmg: 16, skin: ['#9a7a6a'], eyes: '#ff3a1a', mass: 8, boss: true, armor: 0.3, helmet: true, vest: true },
 };
 
 const SHIRTS = ['#5a6a7a', '#7a5a4a', '#6a6a5a', '#8a7a6a', '#4a5a4a', '#7a4a4a', '#5a5a6a', '#9a8a6a'];
 const PANTS = ['#3a3e4a', '#4a4032', '#2e3238', '#5a5040'];
 const BANDIT_SHIRTS = ['#2a2c30', '#3a3228', '#4a3a2a', '#2a3a2a'];
 
-const MAX = 72;
+const MAX = 90;
 const _m = new THREE.Matrix4();
 const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
 const _c = new THREE.Color();
 const _white = new THREE.Color(1, 1, 1);
+const _t = new THREE.Matrix4();
+const _t2 = new THREE.Matrix4();
 
 function makeRig() {
   const root = new THREE.Object3D();
@@ -138,6 +165,10 @@ export class Humans {
       armR: mk(g.arm, mat),
       eyes: mk(g.eyes, glow),
       gun: mk(g.gun, mat),
+      helmet: mk(g.helmet, mat),
+      vest: mk(g.vest, mat),
+      cap: mk(g.cap, mat),
+      belly: mk(g.belly, mat),
     };
     this.meshes.eyes.castShadow = false;
     this.slots = [];
@@ -159,6 +190,15 @@ export class Humans {
     s.flash = 0;
     s.hasGun = !!T.human;
     s.thin = !!T.thin;
+    s.acc = { helmet: !!T.helmet, vest: !!T.vest, belly: !!T.belly, cap: !T.helmet && rng.chance(T.cap || 0) };
+    s.capColor = new THREE.Color(rng.pick(['#b8261e', '#2f5f9e', '#3a3a3a', '#d8a018', '#4a6a3a']));
+    for (const k of ['helmet', 'vest', 'belly']) {
+      this.meshes[k].setColorAt(s.i, _white);
+      this.meshes[k].instanceColor.needsUpdate = true;
+    }
+    this.meshes.belly.setColorAt(s.i, skin);
+    this.meshes.cap.setColorAt(s.i, s.capColor);
+    this.meshes.cap.instanceColor.needsUpdate = true;
     this._paint(s);
     return s;
   }
@@ -211,6 +251,21 @@ export class Humans {
     put('eyes', r.head);
     if (s.hasGun) put('gun', r.gun);
     else this.meshes.gun.setMatrixAt(s.i, _zero);
+    // снаряжение и особенности вида
+    const acc = s.acc || {};
+    const off = (name, obj, x, y, z, sc = 1) => {
+      if (!acc[name]) {
+        this.meshes[name].setMatrixAt(s.i, _zero);
+        return;
+      }
+      _m.copy(obj.matrixWorld).multiply(_t.makeTranslation(x, y, z));
+      if (sc !== 1) _m.multiply(_t2.makeScale(sc, sc, sc));
+      this.meshes[name].setMatrixAt(s.i, _m);
+    };
+    off('helmet', r.head, 0, 0.27, 0);
+    off('cap', r.head, 0, 0.33, 0.01);
+    off('vest', r.torso, 0, 0.36, 0, 1.0);
+    off('belly', r.torso, 0, 0.26, 0.1);
     if (s.flash > 0) {
       s.flash -= dt * 8;
       this._paint(s, Math.max(0, s.flash));

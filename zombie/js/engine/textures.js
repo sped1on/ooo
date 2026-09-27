@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { Rng, fbm } from './util.js';
+import { setTexFactory } from './geo.js';
 
 const cache = new Map();
 
@@ -396,3 +397,163 @@ export function metalSheetTex(base = '#7c8288') {
     return toTex(c);
   });
 }
+
+// ------------------------------ материалы построек ------------------------------
+// Светлые текстуры с деталями; цвет задают вершины модели.
+
+function rustSpots(ctx, w, h, rng, n, a = 0.5) {
+  for (let i = 0; i < n; i++) {
+    const x = rng.f(0, w);
+    const y = rng.f(0, h);
+    const r = rng.f(8, 40);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(120,58,22,${a})`);
+    g.addColorStop(0.7, `rgba(150,80,35,${a * 0.5})`);
+    g.addColorStop(1, 'rgba(150,80,35,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+}
+
+function streaks(ctx, w, h, rng, n, col) {
+  for (let i = 0; i < n; i++) {
+    const x = rng.f(0, w);
+    const y = rng.f(0, h * 0.6);
+    const len = rng.f(20, 90);
+    const g = ctx.createLinearGradient(x, y, x, y + len);
+    g.addColorStop(0, col);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, rng.f(1.5, 4), len);
+  }
+}
+
+export function materialTex(key) {
+  return cached(`mat:${key}`, () => {
+    const S = 256;
+    const c = canvas(S, S);
+    const ctx = c.getContext('2d');
+    const rng = new Rng(key.length * 97 + key.charCodeAt(0));
+    switch (key) {
+      case 'metal': {
+        // профнастил: вертикальные волны, ржавчина, потёки
+        ctx.fillStyle = '#d6d6d4';
+        ctx.fillRect(0, 0, S, S);
+        for (let x = 0; x < S; x += 16) {
+          const g = ctx.createLinearGradient(x, 0, x + 16, 0);
+          g.addColorStop(0, 'rgba(255,255,255,0.35)');
+          g.addColorStop(0.35, 'rgba(0,0,0,0.05)');
+          g.addColorStop(0.6, 'rgba(0,0,0,0.28)');
+          g.addColorStop(1, 'rgba(255,255,255,0.3)');
+          ctx.fillStyle = g;
+          ctx.fillRect(x, 0, 16, S);
+        }
+        rustSpots(ctx, S, S, rng, 16, 0.55);
+        streaks(ctx, S, S, rng, 40, 'rgba(110,55,20,0.45)');
+        // стык листов и заклёпки
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(0, 126, S, 3);
+        ctx.fillStyle = 'rgba(40,30,20,0.6)';
+        for (let x = 8; x < S; x += 32) {
+          ctx.beginPath();
+          ctx.arc(x, 120, 2, 0, Math.PI * 2);
+          ctx.arc(x, 250, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      case 'roofm': {
+        ctx.fillStyle = '#cfcfcc';
+        ctx.fillRect(0, 0, S, S);
+        for (let y = 0; y < S; y += 21) {
+          const g = ctx.createLinearGradient(0, y, 0, y + 21);
+          g.addColorStop(0, 'rgba(255,255,255,0.3)');
+          g.addColorStop(0.6, 'rgba(0,0,0,0.3)');
+          g.addColorStop(1, 'rgba(255,255,255,0.25)');
+          ctx.fillStyle = g;
+          ctx.fillRect(0, y, S, 21);
+        }
+        rustSpots(ctx, S, S, rng, 22, 0.6);
+        break;
+      }
+      case 'wood':
+      case 'plank': {
+        // доски с щелями, волокнами и сучками
+        ctx.fillStyle = '#e2d6c4';
+        ctx.fillRect(0, 0, S, S);
+        const n = key === 'wood' ? 8 : 4;
+        const hh = S / n;
+        for (let i = 0; i < n; i++) {
+          const y = i * hh;
+          ctx.fillStyle = `rgba(${rng.i(80, 120)},${rng.i(55, 80)},30,${rng.f(0.05, 0.22)})`;
+          ctx.fillRect(0, y, S, hh);
+          ctx.strokeStyle = 'rgba(70,45,25,0.18)';
+          ctx.lineWidth = 1;
+          for (let k = 0; k < 7; k++) {
+            ctx.beginPath();
+            const yy = y + rng.f(2, hh - 2);
+            ctx.moveTo(0, yy);
+            for (let x = 0; x <= S; x += 32) ctx.lineTo(x, yy + rng.f(-1.5, 1.5));
+            ctx.stroke();
+          }
+          if (rng.chance(0.5)) {
+            ctx.fillStyle = 'rgba(70,40,20,0.45)';
+            ctx.beginPath();
+            ctx.ellipse(rng.f(20, 236), y + hh / 2, rng.f(3, 6), rng.f(2, 4), 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.fillStyle = 'rgba(30,20,12,0.7)';
+          ctx.fillRect(0, y + hh - 2, S, 2);
+          // гвозди и торцы
+          const cut = rng.f(40, 220);
+          ctx.fillRect(cut, y, 2, hh);
+          ctx.fillStyle = 'rgba(40,40,40,0.8)';
+          ctx.fillRect(cut + 5, y + 4, 2, 2);
+          ctx.fillRect(cut - 6, y + hh - 7, 2, 2);
+        }
+        break;
+      }
+      case 'brick': {
+        ctx.fillStyle = '#d8d2c8';
+        ctx.fillRect(0, 0, S, S);
+        const bh = 16;
+        const bw = 42;
+        for (let row = 0; row < S / bh; row++) {
+          const off = row % 2 ? bw / 2 : 0;
+          for (let x = -bw; x < S + bw; x += bw) {
+            const v = rng.f(0.75, 1.05);
+            ctx.fillStyle = `rgb(${Math.round(200 * v)},${Math.round(150 * v)},${Math.round(125 * v)})`;
+            ctx.fillRect(x + off + 1.5, row * bh + 1.5, bw - 3, bh - 3);
+          }
+        }
+        rustSpots(ctx, S, S, rng, 6, 0.25);
+        speckle(ctx, S, S, 500, ['#000', '#fff'], 0.5, 1.5, rng, 0.12);
+        break;
+      }
+      case 'concrete':
+      default: {
+        ctx.fillStyle = '#d4d2cc';
+        ctx.fillRect(0, 0, S, S);
+        speckle(ctx, S, S, 1400, ['#000', '#fff'], 0.5, 2, rng, 0.08);
+        for (let i = 0; i < 10; i++) {
+          const x = rng.f(0, S);
+          const y = rng.f(0, S);
+          const g = ctx.createRadialGradient(x, y, 0, x, y, rng.f(20, 70));
+          g.addColorStop(0, 'rgba(60,55,45,0.22)');
+          g.addColorStop(1, 'rgba(60,55,45,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, S, S);
+        }
+        streaks(ctx, S, S, rng, 20, 'rgba(60,55,45,0.25)');
+        // швы плит
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(0, S - 2, S, 2);
+        ctx.fillRect(S - 2, 0, 2, S);
+        break;
+      }
+    }
+    return toTex(c);
+  });
+}
+
+setTexFactory(materialTex);

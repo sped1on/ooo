@@ -1,7 +1,7 @@
 // Модели подбираемых предметов и динамических объектов уровня.
 
 import * as THREE from 'three';
-import { GeoBuilder, vcMat } from '../engine/geo.js';
+import { GeoBuilder, vcMat, geoMesh, matsFor } from '../engine/geo.js';
 import * as P from '../world/props.js';
 
 const geos = {};
@@ -70,7 +70,7 @@ let ringGeo = null;
 const ringMats = {};
 export function makePickup(kind) {
   const grp = new THREE.Group();
-  const m = new THREE.Mesh(pickupGeo(kind), vcMat());
+  const m = geoMesh(pickupGeo(kind));
   m.position.y = 0.9;
   m.castShadow = true;
   grp.add(m);
@@ -107,7 +107,7 @@ export function makeObstacle(o) {
     default:
       geo = g('crate0', () => P.crate(0));
   }
-  const m = new THREE.Mesh(geo, vcMat());
+  const m = geoMesh(geo);
   m.castShadow = true;
   m.receiveShadow = true;
   return m;
@@ -131,13 +131,13 @@ export function projectileMesh(kind) {
       b.cone(0.07, 0.18, 8, '#c21e1e', { z: 0.38, rx: Math.PI / 2 });
       return b.build();
     })();
-    return new THREE.Mesh(rocketGeo, vcMat());
+    return geoMesh(rocketGeo);
   }
-  if (kind === 'mine') return new THREE.Mesh(g('mine', P.mine), vcMat());
+  if (kind === 'mine') return geoMesh(g('mine', P.mine));
   grenadeGeo ||= (() => {
     const b = new GeoBuilder();
     b.ico(0.13, 1, '#3a4028');
     return b.build();
   })();
-  return new THREE.Mesh(grenadeGeo, vcMat());
+  return geoMesh(grenadeGeo);
 }

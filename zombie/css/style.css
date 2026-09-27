@@ -2530,3 +2530,142 @@ button {
     font-size: 3.5rem;
   }
 }
+
+/* зона вращения машины в гараже */
+.orbit-zone {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.orbit-zone:active {
+  cursor: grabbing;
+}
+
+.orbit-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10.5rem;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 1rem;
+  color: rgba(230, 236, 243, 0.8);
+  text-shadow: 0 1px 4px #000;
+  pointer-events: none;
+  animation: hintfade 6s forwards;
+}
+
+@keyframes hintfade {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.screen > .orbit-zone ~ * {
+  position: absolute;
+  z-index: 1;
+}
+
+.pin.boss {
+  background: #6a0f0a;
+  color: #ffb01a;
+}
+
+.boss-bar {
+  position: absolute;
+  left: 50%;
+  top: 6.8rem;
+  transform: translateX(-50%);
+  width: min(30rem, 60vw);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 2px 6px #000;
+}
+
+.boss-bar b {
+  display: block;
+  font-size: 1.2rem;
+  letter-spacing: 0.1em;
+  color: #ffb01a;
+  margin-bottom: 0.2rem;
+}
+
+.boss-bar .bar {
+  height: 0.8rem;
+  border: 1px solid rgba(255, 176, 26, 0.6);
+}
+
+/* прицел от первого лица */
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.4rem;
+  height: 2.4rem;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 0.12s;
+}
+
+.crosshair i {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 2px #000;
+}
+
+.crosshair i:nth-child(1),
+.crosshair i:nth-child(2) {
+  left: 50%;
+  width: 2px;
+  height: 0.7rem;
+  margin-left: -1px;
+}
+
+.crosshair i:nth-child(1) {
+  top: 0;
+}
+
+.crosshair i:nth-child(2) {
+  bottom: 0;
+}
+
+.crosshair i:nth-child(3),
+.crosshair i:nth-child(4) {
+  top: 50%;
+  height: 2px;
+  width: 0.7rem;
+  margin-top: -1px;
+}
+
+.crosshair i:nth-child(3) {
+  left: 0;
+}
+
+.crosshair i:nth-child(4) {
+  right: 0;
+}
+
+.crosshair.on {
+  transform: translate(-50%, -50%) scale(0.75);
+}
+
+.crosshair.on i {
+  background: #ff4a3a;
+}
+
+.look-zone {
+  position: absolute;
+  right: 0;
+  top: 15%;
+  bottom: 0;
+  width: 55%;
+  touch-action: none;
+}

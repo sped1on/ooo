@@ -1,7 +1,7 @@
 // Сцены меню: база снаружи (главное меню) и гараж изнутри.
 
 import * as THREE from 'three';
-import { GeoBuilder, vcMat } from '../engine/geo.js';
+import { GeoBuilder, vcMat, geoMesh, matsFor } from '../engine/geo.js';
 import { Rng, damp, fbm } from '../engine/util.js';
 import { concreteTex, garageFloorTex, textTex, metalSheetTex, groundTex } from '../engine/textures.js';
 import { makeSky, makeMountains, makeLights } from './env.js';
@@ -57,18 +57,18 @@ export class MenuScene {
     // дорога от ворот
     const road = new GeoBuilder();
     road.box(8, 0.05, 140, '#6a6258', { y: 0.03, z: 70 });
-    scene.add(new THREE.Mesh(road.build(), vcMat()));
+    scene.add(geoMesh(road.build()));
 
     // база
-    const base = new THREE.Mesh(P.baseModel('#2f5f9e').build(), vcMat());
+    const base = geoMesh(P.baseModel('#2f5f9e').build());
     base.castShadow = true;
     base.receiveShadow = true;
     scene.add(base);
     const dg = P.gateDoor().build();
-    const l = new THREE.Mesh(dg, vcMat());
+    const l = geoMesh(dg);
     l.position.x = -P.BASE.gateHalf;
     l.rotation.y = 1.5;
-    const r = new THREE.Mesh(dg, vcMat());
+    const r = geoMesh(dg);
     r.position.x = P.BASE.gateHalf;
     r.rotation.y = Math.PI - 1.5;
     scene.add(l, r);
@@ -97,7 +97,7 @@ export class MenuScene {
     sc.merge(P.barrels(3, 1), { x: -8, z: 9 });
     sc.merge(P.tires(), { x: 7, z: 5 });
     sc.merge(P.roadSign(1), { x: 6, z: 22, ry: Math.PI });
-    const scm = new THREE.Mesh(sc.build(), vcMat());
+    const scm = geoMesh(sc.build());
     scm.castShadow = true;
     scm.receiveShadow = true;
     scene.add(scm);
@@ -221,7 +221,7 @@ export class GarageScene {
     // трубы под потолком
     props.box(W, 0.2, 0.2, '#3a3e44', { y: H - 0.4, z: -D / 2 + 0.4 });
     props.box(0.2, 0.2, D, '#3a3e44', { x: -W / 2 + 0.4, y: H - 0.6 });
-    const pm = new THREE.Mesh(props.build(), vcMat());
+    const pm = geoMesh(props.build());
     pm.castShadow = true;
     pm.receiveShadow = true;
     scene.add(pm);
@@ -301,8 +301,10 @@ export class GarageScene {
 
   update(dt) {
     this.t += dt;
+    const idle = this.t - (this.lastTouch || -99) > 3;
     if (!this.drag) {
-      this.rotV = damp(this.rotV, 0.12, 1.5, dt);
+      // инерция после броска, затем медленное автовращение
+      this.rotV = damp(this.rotV, idle ? 0.12 : 0, idle ? 0.8 : 2.5, dt);
       this.rot += this.rotV * dt;
     }
     this.turn.rotation.y = this.rot;
@@ -319,14 +321,24 @@ export class GarageScene {
     this.warm.intensity = 14 * k;
     for (const l of this.lamps) l.material.color.setScalar(0.15 + 0.85 * k);
     const L = this.carLen || 4.5;
-    const d = (this.portrait ? 12 : 8.2) + (L - 4.5) * 0.8;
+    const d = ((this.portrait ? 12 : 8.2) + (L - 4.5) * 0.8) * (this.zoom || 1);
     const off = this.portrait ? 0 : 0.9;
-    this.camera.position.set(Math.sin(0.55) * d + off, 2.6 + (this.portrait ? 1.5 : 0), Math.cos(0.55) * d + 1);
-    this.camera.lookAt(off - 0.3, 0.9, 0);
+    const el = this.pitch ?? 0.2;
+    const ty = 0.9;
+    this.camera.position.set(off - 0.3 + Math.sin(0.55) * d * Math.cos(el), ty + Math.sin(el) * d, Math.cos(0.55) * d * Math.cos(el));
+    this.camera.lookAt(off - 0.3, ty, 0);
   }
 
-  onDrag(dx) {
+  // Вращение мышью/пальцем: dx — по горизонтали (поворот машины), dy — наклон камеры
+  onDrag(dx, dy = 0) {
+    this.lastTouch = this.t;
     this.rot += dx * 0.01;
-    this.rotV = dx * 0.3;
+    this.rotV = dx * 0.6;
+    this.pitch = Math.min(0.75, Math.max(0.02, (this.pitch ?? 0.2) + dy * 0.004));
+  }
+
+  onZoom(f) {
+    this.lastTouch = this.t;
+    this.zoom = Math.min(1.45, Math.max(0.6, (this.zoom || 1) * f));
   }
 }

@@ -6,7 +6,7 @@ import { buildGun, vestGeo, helmetGeo, medkitGeo } from '../world/guns.js';
 import { makePickup } from '../game/pickups.js';
 import { findCar, ARMOR, MEDKITS } from '../data/catalog.js';
 import * as P from '../world/props.js';
-import { vcMat } from '../engine/geo.js';
+import { vcMat, geoMesh, matsFor } from '../engine/geo.js';
 
 const W = 320;
 const H = 220;
@@ -123,7 +123,7 @@ function build(key) {
       return [g, { az: 0.6, el: 0.35 }];
     }
     case 'crate': {
-      const m = new THREE.Mesh(P.crate(0).build(), vcMat());
+      const m = geoMesh(P.crate(0).build());
       return [m, { az: 0.6, el: 0.35 }];
     }
     default:

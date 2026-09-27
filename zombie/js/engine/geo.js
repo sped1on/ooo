@@ -23,14 +23,34 @@ export function makeMatrix(t) {
   return _m.compose(_v, _q, _s);
 }
 
-export class GeoBuilder {
+// Масштаб текстур материалов: метров на один повтор
+const TEX_SCALE = { plain: 1, metal: 2.4, wood: 2.2, brick: 1.6, concrete: 3, roofm: 2, plank: 1.2 };
+
+class Channel {
   constructor() {
     this.pos = [];
     this.nor = [];
     this.col = [];
+    this.uv = [];
+  }
+}
+
+export class GeoBuilder {
+  constructor() {
+    this.ch = { plain: new Channel() };
   }
 
-  // Добавить готовую геометрию с цветом и трансформацией
+  // для совместимости: основные массивы — канал plain
+  get pos() {
+    return this.ch.plain.pos;
+  }
+
+  channel(key) {
+    return (this.ch[key] ||= new Channel());
+  }
+
+  // Добавить готовую геометрию с цветом и трансформацией.
+  // opts.mat — материал с текстурой (metal, wood, brick, concrete, roofm, plank)
   add(geo, color, t, opts = {}) {
     let g = geo.index ? geo.toNonIndexed() : geo.clone();
     const m = makeMatrix(t).clone();
@@ -43,10 +63,13 @@ export class GeoBuilder {
     const n = g.attributes.normal.array;
     _c.set(color);
     const jit = opts.jitter || 0;
-    const grad = opts.grad; // затемнение книзу: [yMin, yMax, factor]
+    const grad = opts.grad;
+    const key = opts.mat || 'plain';
+    const ch = this.channel(key);
+    const sc = 1 / (TEX_SCALE[key] || 1);
     for (let i = 0; i < p.length; i += 3) {
-      this.pos.push(p[i], p[i + 1], p[i + 2]);
-      this.nor.push(n[i], n[i + 1], n[i + 2]);
+      ch.pos.push(p[i], p[i + 1], p[i + 2]);
+      ch.nor.push(n[i], n[i + 1], n[i + 2]);
       let k = 1;
       if (jit && i % 9 === 0) this._j = 1 + (Math.random() - 0.5) * jit;
       if (jit) k *= this._j;
@@ -54,7 +77,14 @@ export class GeoBuilder {
         const t2 = Math.min(1, Math.max(0, (p[i + 1] - grad[0]) / (grad[1] - grad[0])));
         k *= grad[2] + (1 - grad[2]) * t2;
       }
-      this.col.push(_c.r * k, _c.g * k, _c.b * k);
+      ch.col.push(_c.r * k, _c.g * k, _c.b * k);
+      // проекция текстуры по доминирующей оси нормали (одинаковый масштаб на всех гранях)
+      const ax = Math.abs(n[i]);
+      const ay = Math.abs(n[i + 1]);
+      const az = Math.abs(n[i + 2]);
+      if (ay >= ax && ay >= az) ch.uv.push(p[i] * sc, p[i + 2] * sc);
+      else if (ax >= az) ch.uv.push(p[i + 2] * sc, p[i + 1] * sc);
+      else ch.uv.push(p[i] * sc, p[i + 1] * sc);
     }
     g.dispose();
     return this;
@@ -96,7 +126,6 @@ export class GeoBuilder {
     const len = dir.length();
     const g = new THREE.BoxGeometry(w, h, len);
     const m = new THREE.Matrix4().lookAt(a, b, new THREE.Vector3(0, 1, 0));
-    // lookAt смотрит по -Z, но коробка симметрична — подходит
     m.setPosition(new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5));
     return this.add(g, color, m, opts);
   }
@@ -104,25 +133,59 @@ export class GeoBuilder {
   merge(other, t) {
     const m = makeMatrix(t).clone();
     _n.getNormalMatrix(m);
-    for (let i = 0; i < other.pos.length; i += 3) {
-      _v.set(other.pos[i], other.pos[i + 1], other.pos[i + 2]).applyMatrix4(m);
-      this.pos.push(_v.x, _v.y, _v.z);
-      _v.set(other.nor[i], other.nor[i + 1], other.nor[i + 2]).applyMatrix3(_n).normalize();
-      this.nor.push(_v.x, _v.y, _v.z);
-      this.col.push(other.col[i], other.col[i + 1], other.col[i + 2]);
+    for (const key in other.ch) {
+      const src = other.ch[key];
+      const dst = this.channel(key);
+      for (let i = 0; i < src.pos.length; i += 3) {
+        _v.set(src.pos[i], src.pos[i + 1], src.pos[i + 2]).applyMatrix4(m);
+        dst.pos.push(_v.x, _v.y, _v.z);
+        _v.set(src.nor[i], src.nor[i + 1], src.nor[i + 2]).applyMatrix3(_n).normalize();
+        dst.nor.push(_v.x, _v.y, _v.z);
+        dst.col.push(src.col[i], src.col[i + 1], src.col[i + 2]);
+      }
+      for (let i = 0; i < src.uv.length; i++) dst.uv.push(src.uv[i]);
     }
     return this;
   }
 
   get empty() {
-    return this.pos.length === 0;
+    return Object.values(this.ch).every((c) => c.pos.length === 0);
   }
 
+  // Геометрия с группами по материалам; список ключей материалов — в userData.mats
   build() {
+    const keys = Object.keys(this.ch).filter((k) => this.ch[k].pos.length);
+    const pos = [];
+    const nor = [];
+    const col = [];
+    const uv = [];
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    let start = 0;
+    const total = keys.reduce((a, k) => a + this.ch[k].pos.length / 3, 0);
+    const P = new Float32Array(total * 3);
+    const N = new Float32Array(total * 3);
+    const C = new Float32Array(total * 3);
+    const U = new Float32Array(total * 2);
+    keys.forEach((k, i) => {
+      const c = this.ch[k];
+      const count = c.pos.length / 3;
+      P.set(c.pos, start * 3);
+      N.set(c.nor, start * 3);
+      C.set(c.col, start * 3);
+      U.set(c.uv, start * 2);
+      g.addGroup(start, count, i);
+      start += count;
+    });
+    void pos;
+    void nor;
+    void col;
+    void uv;
+    g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(C, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(U, 2));
+    g.userData.mats = keys.length ? keys : ['plain'];
+    if (keys.length <= 1) g.clearGroups();
     g.computeBoundingSphere();
     g.computeBoundingBox();
     return g;
@@ -141,9 +204,32 @@ export function vcStd() {
   return _std;
 }
 
+// Материалы с текстурами (задаются из textures.js, чтобы не было циклических импортов)
+let texFactory = null;
+export function setTexFactory(fn) {
+  texFactory = fn;
+}
+const texMats = {};
+export function matFor(key) {
+  if (key === 'glow') return (texMats.glow ||= new THREE.MeshBasicMaterial({ vertexColors: true }));
+  if (key === 'plain' || !texFactory) return vcMat();
+  if (!texMats[key]) texMats[key] = new THREE.MeshLambertMaterial({ vertexColors: true, map: texFactory(key) });
+  return texMats[key];
+}
+// Материал(ы) для геометрии из GeoBuilder
+export function matsFor(geo) {
+  const keys = geo.userData?.mats || ['plain'];
+  return keys.length > 1 ? keys.map(matFor) : matFor(keys[0]);
+}
+
 export function vcMesh(builder, std = false) {
-  const m = new THREE.Mesh(builder.build(), std ? vcStd() : vcMat());
+  const geo = builder.build();
+  const m = new THREE.Mesh(geo, std ? vcStd() : matsFor(geo));
   m.castShadow = true;
   m.receiveShadow = true;
   return m;
+}
+
+export function geoMesh(geo) {
+  return new THREE.Mesh(geo, matsFor(geo));
 }

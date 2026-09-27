@@ -239,21 +239,35 @@ export function baseInfo(n) {
   return { n, name: `База ${n}`, sub: `Дикие земли · ${BIOMES[biome].name}`, biome };
 }
 
-// Параметры поездки к базе n (из базы n-1)
+// Параметры поездки к базе n (из базы n-1). С каждой базой зомби сильнее, быстрее и разнообразнее.
 export function levelParams(n) {
   const k = Math.max(0, n - 2);
+  // доли видов (остальное — обычные ходоки)
+  const mix = {
+    runner: k < 1 ? 0.08 : Math.min(0.12 + k * 0.03, 0.3),
+    crawler: 0.1,
+    brute: k < 1 ? 0 : Math.min(0.04 + k * 0.012, 0.12),
+    armored: k < 1 ? 0 : Math.min(0.05 + k * 0.02, 0.18),
+    spitter: k < 2 ? 0 : Math.min(0.04 + k * 0.012, 0.12),
+    exploder: k < 2 ? 0 : Math.min(0.04 + k * 0.01, 0.1),
+  };
+  const bosses = ['tank', 'queen', 'butcher'];
   return {
     length: Math.min(1300 + k * 160, 3000),
     zombieDensity: Math.min(0.05 + k * 0.01, 0.14),
-    runnerShare: k < 1 ? 0.05 : Math.min(0.12 + k * 0.03, 0.35),
-    bruteShare: k < 1 ? 0 : Math.min(0.04 + k * 0.012, 0.14),
-    toxicShare: k < 2 ? 0 : Math.min(0.05 + k * 0.01, 0.12),
-    hpMul: 1 + k * 0.12,
+    mix,
+    hpMul: 1 + k * 0.15,
+    speedMul: Math.min(1 + k * 0.035, 1.35),
+    dmgMul: 1 + k * 0.12,
+    boss: bosses[k % 3],
+    bossMul: 1 + k * 0.35,
+    stationBoss: k >= 3,
     bandits: k === 0 ? 3 : Math.min(3 + k, 9),
     mines: k === 0 ? 3 : Math.min(4 + k * 2, 16),
     stationWave: Math.min(8 + k * 3, 30),
     killGoal: Math.min(12 + k * 5, 60),
     reward: 450 + k * 150,
+    bossReward: { cash: 400 + k * 200, gold: 5 + k * 2 },
   };
 }
 
@@ -271,6 +285,8 @@ export const TASKS = [
   { id: 'foot50', text: 'Убей 50 зомби пешком', stat: 'footKills', goal: 50, reward: { gold: 10 } },
   { id: 'dist10', text: 'Проедь 10 км', stat: 'distance', goal: 10000, reward: { gold: 10 } },
   { id: 'brute10', text: 'Убей 10 громил', stat: 'brutes', goal: 10, reward: { gold: 15 } },
+  { id: 'boss1', text: 'Победи босса', stat: 'bosses', goal: 1, reward: { gold: 10 } },
+  { id: 'boss5', text: 'Победи 5 боссов', stat: 'bosses', goal: 5, reward: { gold: 40 } },
   { id: 'base5', text: 'Доберись до Базы 5', stat: 'maxBase', goal: 5, reward: { gold: 25 } },
   { id: 'upgrade3', text: 'Улучши базу 3 раза', stat: 'baseUps', goal: 3, reward: { cash: 2000 } },
   { id: 'car2', text: 'Купи вторую машину', stat: 'cars', goal: 2, reward: { gold: 20 } },
@@ -328,3 +344,15 @@ export function findGun(id) {
 export function findArmor(id) {
   return ARMOR.find((a) => a.id === id) || null;
 }
+
+// Случайный вид зомби по долям из levelParams().mix
+export function pickZombieType(mix, r) {
+  let acc = 0;
+  for (const k in mix) {
+    acc += mix[k];
+    if (r < acc) return k;
+  }
+  return 'walker';
+}
+
+export const ZBOSS_NAMES = { tank: 'Танк', queen: 'Королева заразы', butcher: 'Мясник' };

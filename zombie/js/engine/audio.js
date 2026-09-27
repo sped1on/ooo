@@ -229,47 +229,120 @@ export const sfx = {
 };
 
 // ------------------------------ двигатель ------------------------------
+// Двигатель: основной тон с затухающими гармониками (как у 4-цилиндрового мотора),
+// пульсация тактов, суббас и мягкий шум впуска. Всё проходит через фильтр
+// и лёгкое насыщение — получается бархатное урчание вместо гудения.
 
 let engine = null;
+
+function engineWave() {
+  const n = 16;
+  const real = new Float32Array(n);
+  const imag = new Float32Array(n);
+  const amps = [0, 1, 0.75, 0.5, 0.42, 0.25, 0.2, 0.12, 0.1, 0.06, 0.05, 0.03, 0.025, 0.015, 0.01, 0.008];
+  for (let i = 1; i < n; i++) imag[i] = amps[i] * (i % 2 ? 1 : 0.8);
+  return ctx.createPeriodicWave(real, imag);
+}
+
+function softClip() {
+  const ws = ctx.createWaveShaper();
+  const curve = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    const x = (i / 1023) * 2 - 1;
+    curve[i] = Math.tanh(x * 1.8) / Math.tanh(1.8);
+  }
+  ws.curve = curve;
+  return ws;
+}
+
 export function engineStart() {
   ensure();
   if (!ctx || engine) return;
-  const o1 = ctx.createOscillator();
-  o1.type = 'sawtooth';
-  const o2 = ctx.createOscillator();
-  o2.type = 'square';
-  const f = ctx.createBiquadFilter();
-  f.type = 'lowpass';
-  f.frequency.value = 400;
-  const g = ctx.createGain();
-  g.gain.value = 0;
-  o1.connect(f);
-  o2.connect(f);
-  f.connect(g).connect(sfxBus);
-  o1.start();
-  o2.start();
-  engine = { o1, o2, f, g };
+  const t = ctx.currentTime;
+  const main = ctx.createOscillator();
+  main.setPeriodicWave(engineWave());
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  const sec = ctx.createOscillator();
+  sec.setPeriodicWave(engineWave());
+  sec.detune.value = 9;
+  // пульсация тактов: амплитудная модуляция
+  const pulse = ctx.createGain();
+  pulse.gain.value = 0.75;
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.25;
+  lfo.connect(lfoGain).connect(pulse.gain);
+  // шум впуска
+  const noiseSrc = ctx.createBufferSource();
+  noiseSrc.buffer = noiseBuf;
+  noiseSrc.loop = true;
+  const nf = ctx.createBiquadFilter();
+  nf.type = 'bandpass';
+  nf.Q.value = 0.9;
+  const ng = ctx.createGain();
+  ng.gain.value = 0.05;
+  noiseSrc.connect(nf).connect(ng);
+
+  const mix = ctx.createGain();
+  mix.gain.value = 0.5;
+  const subG = ctx.createGain();
+  subG.gain.value = 0.55;
+  const secG = ctx.createGain();
+  secG.gain.value = 0.35;
+  main.connect(mix);
+  sec.connect(secG).connect(mix);
+  sub.connect(subG).connect(mix);
+  ng.connect(mix);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.Q.value = 0.8;
+  lp.frequency.value = 500;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 35;
+  const sat = softClip();
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(0, t);
+  out.gain.linearRampToValueAtTime(0.09, t + 0.6);
+  mix.connect(pulse).connect(sat).connect(lp).connect(hp).connect(out).connect(sfxBus);
+  for (const o of [main, sub, sec, lfo]) o.start(t);
+  noiseSrc.start(t);
+  engine = { main, sub, sec, lfo, nf, lp, out, lfoGain, noiseSrc, ng };
+  engineSet(0, 0.3);
+  // стартер
+  noise(0.5, { freq: 700, gain: 0.12, type: 'bandpass', q: 3, attack: 0.02, decay: 0.45 });
 }
 
+// rpm: 0..1 (холостые … отсечка), load: нагрузка (газ)
 export function engineSet(rpm, load = 0.5) {
   if (!engine) return;
   const t = ctx.currentTime;
-  const base = 38 + rpm * 70;
-  engine.o1.frequency.setTargetAtTime(base, t, 0.08);
-  engine.o2.frequency.setTargetAtTime(base * 0.5, t, 0.08);
-  engine.f.frequency.setTargetAtTime(300 + rpm * 900 + load * 400, t, 0.1);
-  engine.g.gain.setTargetAtTime(0.05 + load * 0.05, t, 0.1);
+  const r = Math.max(0, Math.min(1.1, rpm));
+  const f = 26 + r * 62; // частота вспышек в цилиндрах, Гц
+  const k = 0.12;
+  engine.main.frequency.setTargetAtTime(f, t, k);
+  engine.sec.frequency.setTargetAtTime(f * 1.5, t, k);
+  engine.sub.frequency.setTargetAtTime(f / 2, t, k);
+  engine.lfo.frequency.setTargetAtTime(f / 4, t, k);
+  engine.lfoGain.gain.setTargetAtTime(0.3 - r * 0.18, t, 0.2);
+  engine.nf.frequency.setTargetAtTime(400 + r * 1400, t, k);
+  engine.ng.gain.setTargetAtTime(0.03 + load * 0.06, t, 0.15);
+  engine.lp.frequency.setTargetAtTime(260 + r * 900 + load * 500, t, k);
+  engine.out.gain.setTargetAtTime(0.06 + load * 0.035 + r * 0.02, t, 0.2);
 }
 
 export function engineStop() {
   if (!engine) return;
   const e = engine;
   engine = null;
-  e.g.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+  const t = ctx.currentTime;
+  e.main.frequency.setTargetAtTime(18, t, 0.3);
+  e.out.gain.setTargetAtTime(0, t, 0.25);
   setTimeout(() => {
-    e.o1.stop();
-    e.o2.stop();
-  }, 500);
+    for (const o of [e.main, e.sub, e.sec, e.lfo, e.noiseSrc]) o.stop();
+  }, 1500);
 }
 
 // ------------------------------ музыка ------------------------------

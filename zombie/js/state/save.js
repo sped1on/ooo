@@ -26,7 +26,7 @@ export function defaultSave() {
     helmet: null,
     inv: { wood: 0, metal: 0, cloth: 0, ammo: 2, repair: 1, fuel: 1, med1: 2, med2: 0, med3: 0, med4: 0, crate: 0 },
     baseUp: { workshop: 0, armory: 0, depot: 0 },
-    stats: { kills: 0, brutes: 0, bandits: 0, footKills: 0, crates: 0, wood: 0, metal: 0, cloth: 0, distance: 0, purchases: 0, maxBase: 1, baseUps: 0, cars: 1, refuels: 0, levels: 0 },
+    stats: { kills: 0, brutes: 0, bosses: 0, bandits: 0, footKills: 0, crates: 0, wood: 0, metal: 0, cloth: 0, distance: 0, purchases: 0, maxBase: 1, baseUps: 0, cars: 1, refuels: 0, levels: 0 },
     tasks: {},
     daily: { n: 0, last: '' },
     wheelLast: 0,

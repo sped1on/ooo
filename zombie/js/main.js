@@ -33,7 +33,7 @@ const app = {
   screen: null,
   screenName: '',
   view: 'menu', // какая 3D-сцена рисуется
-  touchInput: { left: false, right: false, brake: false, fire: false, joyX: 0, joyY: 0 },
+  touchInput: { left: false, right: false, brake: false, fire: false, joyX: 0, joyY: 0, lookDX: 0, lookDY: 0 },
   keys: new Set(),
   mouseFire: false,
   paused: false,
@@ -283,7 +283,7 @@ app.baseThumb = async () => {
 // ------------------------------ ввод ------------------------------
 
 function bindInput() {
-  const KEYMAP = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', Space: 'fire', KeyJ: 'fire' };
+  const KEYMAP = { KeyA: 'left', ArrowLeft: 'tleft', KeyD: 'right', ArrowRight: 'tright', KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', Space: 'fire', KeyJ: 'fire' };
   window.addEventListener('keydown', (e) => {
     unlockAudio();
     const k = KEYMAP[e.code];
@@ -309,23 +309,85 @@ function bindInput() {
   window.addEventListener('blur', () => app.keys.clear());
   const canvas = document.getElementById('gl');
   canvas.addEventListener('pointerdown', (e) => {
-    if (app.screenName === 'game' && e.pointerType === 'mouse' && e.button === 0) app.mouseFire = true;
-    if (app.view === 'garage') {
-      app.dragX = e.clientX;
-      app.garage.drag = true;
-    }
-  });
-  window.addEventListener('pointermove', (e) => {
-    if (app.garage?.drag && app.dragX != null) {
-      app.garage.onDrag(e.clientX - app.dragX);
-      app.dragX = e.clientX;
+    if (app.screenName !== 'game' || e.pointerType !== 'mouse') return;
+    if (e.button === 0) app.mouseFire = true;
+    app.mouseLook = true;
+    // пешком на ПК захватываем мышь для обзора
+    if (app.level?.state === 'foot' && !document.pointerLockElement) {
+      try {
+        const r = canvas.requestPointerLock?.();
+        r?.catch?.(() => {});
+      } catch {
+        // обзор перетаскиванием
+      }
     }
   });
   window.addEventListener('pointerup', () => {
     app.mouseFire = false;
-    if (app.garage) app.garage.drag = false;
-    app.dragX = null;
+    app.mouseLook = false;
   });
+  window.addEventListener('mousemove', (e) => {
+    if (app.screenName !== 'game') return;
+    if (document.pointerLockElement === canvas || app.mouseLook) {
+      app.touchInput.lookDX += e.movementX || 0;
+      app.touchInput.lookDY += e.movementY || 0;
+    }
+  });
+  bindGarageOrbit(canvas);
+}
+
+// Вращение машины в гараже: один палец/мышь — поворот и наклон, два пальца/колесо — приближение
+function bindGarageOrbit(canvas) {
+  const pts = new Map();
+  let pinch = 0;
+  const active = () => app.view === 'garage' && app.garage;
+  const start = (e) => {
+    if (!active()) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    app.garage.drag = true;
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      pinch = Math.hypot(a.x - b.x, a.y - b.y);
+    }
+  };
+  canvas.addEventListener('pointerdown', start);
+  // зона вращения поверх сцены (экран гаража создаёт элемент .orbit-zone)
+  document.addEventListener('pointerdown', (e) => {
+    if (e.target.closest?.('.orbit-zone')) {
+      e.target.setPointerCapture?.(e.pointerId);
+      start(e);
+    }
+  });
+  window.addEventListener('pointermove', (e) => {
+    const p = pts.get(e.pointerId);
+    if (!p || !active()) return;
+    if (pts.size >= 2) {
+      p.x = e.clientX;
+      p.y = e.clientY;
+      const [a, b] = [...pts.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinch > 0) app.garage.onZoom(pinch / d);
+      pinch = d;
+      return;
+    }
+    app.garage.onDrag(e.clientX - p.x, e.clientY - p.y);
+    p.x = e.clientX;
+    p.y = e.clientY;
+  });
+  const end = (e) => {
+    pts.delete(e.pointerId);
+    if (!pts.size && app.garage) app.garage.drag = false;
+    pinch = 0;
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+  canvas.addEventListener(
+    'wheel',
+    (e) => {
+      if (active()) app.garage.onZoom(e.deltaY > 0 ? 1.08 : 0.93);
+    },
+    { passive: true },
+  );
 }
 
 function applyInput() {
@@ -334,12 +396,17 @@ function applyInput() {
   const k = app.keys;
   const t = app.touchInput;
   const inp = lv.input;
-  inp.steer = (k.has('right') || t.right ? 1 : 0) - (k.has('left') || t.left ? 1 : 0);
+  inp.steer = (k.has('right') || k.has('tright') || t.right ? 1 : 0) - (k.has('left') || k.has('tleft') || t.left ? 1 : 0);
   inp.gas = k.has('up');
   inp.brake = k.has('down') || t.brake;
   inp.fire = k.has('fire') || app.mouseFire || t.fire;
   inp.moveX = (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0) + t.joyX;
   inp.moveY = (k.has('up') ? 1 : 0) - (k.has('down') ? 1 : 0) + t.joyY;
+  inp.turn = (k.has('tright') ? 1 : 0) - (k.has('tleft') ? 1 : 0);
+  inp.lookX = t.lookDX;
+  inp.lookY = t.lookDY;
+  t.lookDX = 0;
+  t.lookDY = 0;
 }
 
 app.useItem = (kind) => {
@@ -447,6 +514,11 @@ function levelEvent(type, data) {
 
 app.pause = () => {
   if (!app.level || app.paused) return;
+  try {
+    document.exitPointerLock?.();
+  } catch {
+    // нет захвата
+  }
   app.paused = true;
   app.level.paused = true;
   gameplayStop();
@@ -556,6 +628,7 @@ function applyStats(r) {
   s.stats.bandits += r.bandits;
   s.stats.footKills += r.footKills;
   s.stats.crates += r.crates;
+  s.stats.bosses = (s.stats.bosses || 0) + (r.bosses || 0);
   s.stats.distance += r.distance;
   s.stats.wood += r.collected.wood;
   s.stats.metal += r.collected.metal;
@@ -618,6 +691,7 @@ async function arrive(r) {
   s.stats.levels++;
   for (const k of ['wood', 'metal', 'cloth', 'ammo']) s.inv[k] = (s.inv[k] || 0) + r.collected[k];
   s.cash += r.cash;
+  s.gold += r.bossGold || 0;
   s.carHp[s.car] = Math.max(0.05, r.carHpFrac);
   store.save();
   submitScore('bases', s.base);
@@ -636,7 +710,7 @@ async function arrive(r) {
 }
 
 function resultsPanel(r, info) {
-  const el = h('div', { class: 'screen active' });
+  const el = h('div', { class: 'screen active' }, h('div', { class: 'orbit-zone' }));
   const s = S();
   const line = (ic, name, val, col) => h('div', { class: 'line' }, h('span', { html: `${icon(ic)} ${name}` }), h('b', { style: col ? { color: col } : {} }, val));
   let doubled = false;
@@ -669,6 +743,7 @@ function resultsPanel(r, info) {
     line('cash', 'Подобрано', `+${fmt(r.picked)}`),
     line('home', 'Награда за базу', `+${fmt(r.baseReward)}`),
     r.bonus ? line('trophy', `Задание: ${r.killGoal} зомби`, `+${fmt(r.bonus)}`, '#7ad84a') : null,
+    r.bossCash ? line('skull', 'Босс повержен', `+${fmt(r.bossCash)} · +${r.bossGold} зол.`, '#ffb01a') : null,
     h('div', { class: 'line total' }, h('span', { html: `${icon('cash')} Итого` }), total),
     h('div', { class: 'line', style: { color: 'var(--muted)', fontSize: '0.95rem' } }, h('span', {}, `Уровень ${li.lvl}`), h('span', {}, `Машина: ${Math.round(r.carHpFrac * 100)}%`)),
     h(

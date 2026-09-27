@@ -52,6 +52,7 @@ export function garageScreen(app, startCat = 'body') {
   let cat = startCat;
   let sel = cat === 'body' ? s.car : s.equip[cat];
   const el = h('div', { class: 'screen active garage' });
+  el.append(h('div', { class: 'orbit-zone', title: 'Потяни, чтобы повернуть машину' }, h('span', { class: 'orbit-hint', html: `${icon('left')} Вращай машину ${icon('right')}` })));
   el.append(
     h(
       'div',

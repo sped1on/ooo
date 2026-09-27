@@ -14,6 +14,7 @@ const POI = {
   camp: { icon: 'bandit', name: 'Лагерь бандитов' },
   base: { icon: 'home', name: 'База' },
   bridge: { icon: 'bridge', name: 'Мост' },
+  boss: { icon: 'skull', name: 'Босс' },
 };
 
 // ------------------------------ карта уровня ------------------------------
@@ -102,6 +103,10 @@ export function mapScreen(app, level) {
       if (!d) {
         let title = POI[m.type].name;
         let sub = '';
+        if (m.type === 'boss') {
+          title = `Босс: ${m.name}`;
+          sub = 'Охраняет ворота базы';
+        }
         if (m.type === 'base') {
           title = m.start ? from.name : to.name;
           sub = m.start ? `Уровень ${level.dest - 1} · вы здесь` : `Уровень ${level.dest}`;
@@ -233,6 +238,8 @@ export function hudScreen(app, level, touch) {
   el.append(h('div', { class: 'hcash' }, h('div', { class: 'cur', html: icon('cash') }, cashTxt), h('div', { class: 'cur', html: icon('trunk') }, cargoTxt)));
   const notices = h('div', { class: 'notices' });
   el.append(notices);
+  const bossBar = h('div', { class: 'boss-bar', style: { display: 'none' } }, h('b'), h('div', { class: 'bar hp' }, h('i')));
+  el.append(bossBar);
   const pump = h('div', { class: 'pump-bar panel', style: { display: 'none' } });
   el.append(pump);
   const php = h('div', { class: 'php panel', style: { display: 'none' } });
@@ -321,8 +328,33 @@ export function hudScreen(app, level, touch) {
   hold(fireBtn2, () => (input.fire = true), () => (input.fire = false));
   const medBtn = tap(h('div', { class: 'ctl small med', html: `${icon('medkit')}<span class="n"></span>` }), () => app.useItem('med'));
   const enterBtn = tap(h('div', { class: 'ctl enter', html: `${icon('door')}<span>Сесть в машину</span>` }), () => app.useItem('enter'));
-  if (touch) footCtl.append(joy);
-  else footCtl.append(h('div', { class: 'keys-hint', html: '<kbd>WASD</kbd> идти · стрельба автоматически / <kbd>Пробел</kbd><br><kbd>H</kbd> аптечка · <kbd>E</kbd> сесть в машину' }));
+  // прицел и зона обзора (палец по правой половине экрана)
+  const cross = h('div', { class: 'crosshair' }, h('i'), h('i'), h('i'), h('i'));
+  const look = h('div', { class: 'look-zone' });
+  let lookId = null;
+  let lx = 0;
+  let ly = 0;
+  look.addEventListener('pointerdown', (e) => {
+    lookId = e.pointerId;
+    lx = e.clientX;
+    ly = e.clientY;
+    look.setPointerCapture(e.pointerId);
+  });
+  look.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== lookId) return;
+    input.lookDX += (e.clientX - lx) * 2.2;
+    input.lookDY += (e.clientY - ly) * 2.2;
+    lx = e.clientX;
+    ly = e.clientY;
+  });
+  const lookEnd = () => {
+    lookId = null;
+  };
+  look.addEventListener('pointerup', lookEnd);
+  look.addEventListener('pointercancel', lookEnd);
+  footCtl.append(cross);
+  if (touch) footCtl.append(look, joy);
+  else footCtl.append(h('div', { class: 'keys-hint', html: '<kbd>WASD</kbd> идти · мышь — осмотреться (клик захватывает мышь) · <kbd>←</kbd><kbd>→</kbd> поворот<br>стрельба сама, когда зомби в прицеле · <kbd>H</kbd> аптечка · <kbd>E</kbd> сесть в машину' }));
   footCtl.append(fireBtn2, medBtn, enterBtn);
   el.append(driveCtl, footCtl);
 
@@ -373,6 +405,7 @@ export function hudScreen(app, level, touch) {
     medBtn.querySelector('.n').textContent = d.meds;
     medBtn.classList.toggle('empty', d.meds <= 0);
     enterBtn.style.display = d.canEnter ? '' : 'none';
+    cross.classList.toggle('on', !!d.aimed);
     if (foot) {
       php.innerHTML = `<div class="row"><span>${icon('heart')} Здоровье</span><span class="${d.poison ? 'poison' : ''}">${d.poison ? 'Отравление! ' : ''}${Math.ceil(d.php)}/${d.pmax}</span></div>`;
       php.append(statBar(d.php, d.pmax, 0, `hp ${d.php / d.pmax > 0.4 ? 'good' : ''}`));
@@ -382,6 +415,11 @@ export function hudScreen(app, level, touch) {
         pump.append(statBar(d.pump, 1, 0, 'fuel'));
       } else pump.style.display = 'none';
     }
+    if (d.boss && mode !== 'none') {
+      bossBar.style.display = '';
+      bossBar.firstChild.textContent = `БОСС: ${d.boss.name.toUpperCase()}`;
+      bossBar.lastChild.firstChild.style.width = `${Math.max(0, d.boss.hp / d.boss.max) * 100}%`;
+    } else bossBar.style.display = 'none';
     vign.style.opacity = foot ? Math.min(1, d.hurt * 3 + (d.php / d.pmax < 0.3 ? 0.5 : 0)) : hpK < 0.25 ? 0.5 : 0;
     // сообщения
     const nk = d.notices.map((n) => n.text).join('|');

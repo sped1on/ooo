@@ -194,3 +194,65 @@ export function medkitGeo(item) {
   cache.set(key, g);
   return g;
 }
+
+// ------------------------------ оружие в руках (вид от первого лица) ------------------------------
+
+export class ViewModel {
+  constructor(gunModel, melee, sleeve = '#4a5238') {
+    this.group = new THREE.Group();
+    this.melee = melee;
+    this.hold = new THREE.Group();
+    this.group.add(this.hold);
+    const gun = buildGun(gunModel);
+    // модели оружия смотрят в +Z, камера — в -Z
+    gun.rotation.y = Math.PI;
+    gun.scale.setScalar(melee ? 0.9 : 0.85);
+    this.hold.add(gun);
+    this.gun = gun;
+    const b = new GeoBuilder();
+    // правая рука на рукояти
+    b.box(0.09, 0.1, 0.1, '#3b2a1c', { x: 0.0, y: -0.06, z: 0.02 });
+    b.beam(new THREE.Vector3(0.0, -0.08, 0.06), new THREE.Vector3(0.12, -0.3, 0.42), 0.05, sleeve, 8);
+    // левая рука под цевьём (для одноручного — ближе к рукояти)
+    const fz = melee ? 0.05 : gunModel === 'pistol' || gunModel === 'revolver' ? -0.02 : -0.3;
+    b.box(0.09, 0.08, 0.12, '#3b2a1c', { x: -0.02, y: -0.05, z: fz });
+    b.beam(new THREE.Vector3(-0.02, -0.07, fz + 0.04), new THREE.Vector3(-0.2, -0.32, 0.35), 0.05, sleeve, 8);
+    const arms = new THREE.Mesh(b.build(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+    this.hold.add(arms);
+    this.muzzle = new THREE.Object3D();
+    this.muzzle.position.set(0, 0.05, melee ? -0.5 : -0.8);
+    this.hold.add(this.muzzle);
+    this.base = new THREE.Vector3(0.19, -0.2, -0.46);
+    this.hold.position.copy(this.base);
+    this.recoil = 0;
+    this.swing = 0;
+    this.bob = 0;
+    this.group.traverse((o) => {
+      if (o.isMesh) {
+        o.renderOrder = 10;
+        o.frustumCulled = false;
+      }
+    });
+  }
+
+  kick(amount = 1) {
+    if (this.melee) this.swing = 1;
+    else this.recoil = Math.min(1.5, this.recoil + amount);
+  }
+
+  update(dt, moving, speed, reloading) {
+    this.bob += dt * (moving ? speed * 1.6 : 1.2);
+    const bx = Math.sin(this.bob) * (moving ? 0.018 : 0.004);
+    const by = Math.abs(Math.cos(this.bob)) * (moving ? 0.022 : 0.005);
+    this.recoil = Math.max(0, this.recoil - dt * 9);
+    this.swing = Math.max(0, this.swing - dt * 4);
+    const h = this.hold;
+    h.position.set(this.base.x + bx, this.base.y + by + (reloading ? -0.12 : 0), this.base.z + this.recoil * 0.06);
+    h.rotation.set(this.recoil * 0.12 + (reloading ? 0.6 : 0), 0, reloading ? 0.3 : 0);
+    if (this.melee) {
+      const a = Math.sin(this.swing * Math.PI);
+      h.rotation.set(-a * 1.3 + 0.2, a * 0.6, -a * 0.8);
+      h.position.x -= a * 0.15;
+    }
+  }
+}

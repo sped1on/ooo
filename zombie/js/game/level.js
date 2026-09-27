@@ -6,10 +6,11 @@ import { Track, ROAD_HALF } from '../world/track.js';
 import { buildLevelWorld } from '../world/level-world.js';
 import { makeSky, makeMountains, makeLights, followSun } from '../world/env.js';
 import { CarModel, Cockpit, buildCarWeapon } from '../world/cars.js';
-import { Humans, ZTYPES, poseRig, PlayerModel } from '../world/characters.js';
+import { Humans, ZTYPES, poseRig } from '../world/characters.js';
+import { ViewModel } from '../world/guns.js';
 import { Particles } from '../engine/particles.js';
 import { makePickup, makeObstacle, OBSTACLE_SIZE, projectileMesh, PICKUP_COLORS } from './pickups.js';
-import { BIOMES, baseInfo, levelParams, MEDKITS } from '../data/catalog.js';
+import { BIOMES, baseInfo, levelParams, MEDKITS, pickZombieType } from '../data/catalog.js';
 import { sfx, engineStart, engineSet, engineStop } from '../engine/audio.js';
 import { BASE } from '../world/props.js';
 
@@ -35,7 +36,7 @@ export class Level {
     this.input = { steer: 0, brake: false, gas: false, fire: false, moveX: 0, moveY: 0 };
     this.notices = [];
     this.shake = 0;
-    this.stats = { kills: 0, brutes: 0, bandits: 0, footKills: 0, crates: 0, distance: 0, cash: 0, wood: 0, metal: 0, cloth: 0, ammo: 0, refueled: false };
+    this.stats = { kills: 0, brutes: 0, bosses: 0, bandits: 0, footKills: 0, crates: 0, distance: 0, cash: 0, wood: 0, metal: 0, cloth: 0, ammo: 0, refueled: false };
     this.inv = { ...opts.inv };
     this.revives = 0;
     this.build();
@@ -61,7 +62,7 @@ export class Level {
     this.L = L;
     this.track = new Track({ seed: this.dest * 131 + 7, length: L, stationS: Math.round(L * 0.5), bridgeS: Math.round(L * 0.38), campS: Math.round(L * 0.8) });
     this.track.buildMeshes(this.biome, scene);
-    this.world = buildLevelWorld(scene, this.track, this.biome, this.params, this.rng, { detail: q.detail });
+    this.world = buildLevelWorld(scene, this.track, this.biome, this.params, this.rng, { detail: q.detail, fromName: this.fromInfo.name, toName: this.info.name });
     this.buildRoute();
 
     // машина
@@ -108,6 +109,7 @@ export class Level {
     this.humans = new Humans(scene);
     this.fx = new Particles(scene, q.particles);
     this.projectiles = [];
+    this.acid = [];
     this.myMines = [];
 
     // сущности
@@ -245,7 +247,9 @@ export class Level {
     const slot = this.humans.alloc(d.type, this.rng);
     if (!slot) return null;
     const T = ZTYPES[d.type];
-    const hp = Math.round(T.hp * (d.type === 'bandit' ? 1 + (this.dest - 2) * 0.1 : this.params.hpMul));
+    const P = this.params;
+    const mul = d.type === 'bandit' ? 1 + (this.dest - 2) * 0.1 : T.boss ? P.bossMul : P.hpMul;
+    const hp = Math.round(T.hp * mul);
     const z = {
       type: d.type,
       T,
@@ -255,17 +259,26 @@ export class Level {
       hp,
       maxHp: hp,
       slot,
-      state: 'idle',
+      state: T.boss ? 'chase' : 'idle',
       phase: this.rng.f(0, 6),
       yaw: this.rng.f(0, 6.28),
       wander: this.rng.f(0, 6.28),
       atkT: this.rng.f(0, 1),
       shootT: this.rng.f(0.5, 2),
+      spitT: this.rng.f(1, 3),
+      summonT: 5,
       dead: null,
       burn: 0,
       station: !!d.station,
       groanT: this.rng.f(2, 10),
       stun: 0,
+      latch: null,
+      boss: !!T.boss,
+      mode: 'walk',
+      modeT: 0,
+      sc: T.boss ? T.scale : T.scale * this.rng.f(0.9, 1.1),
+      spd: (T.boss ? 1 : this.rng.f(0.85, 1.15)) * (d.type === 'bandit' ? 1 : P.speedMul),
+      dmg: T.dmg * (d.type === 'bandit' ? 1 : P.dmgMul),
     };
     this.zombies.push(z);
     void force;
@@ -297,6 +310,17 @@ export class Level {
     const c = this.car;
     const ahead = this.state === 'map' ? -1e9 : (this.player ? this.player.s : c.s) + 170;
     const P = this.pending;
+    const bs = this.world.spawns.boss;
+    if (bs && !this.bossSpawned && this.state !== 'map' && c.s > bs.s - 150) {
+      this.bossSpawned = true;
+      const z = this.spawnZombie({ s: bs.s, x: bs.x, type: bs.type });
+      if (z) {
+        this.boss = z;
+        this.notice(`Босс: ${z.T.name}!`, 3, 'bad');
+        sfx.alarm();
+        sfx.groan();
+      }
+    }
     while (this.idx.zombies < P.zombies.length && P.zombies[this.idx.zombies].s < ahead) {
       const d = P.zombies[this.idx.zombies];
       if (!this.spawnZombie(d)) break;
@@ -386,6 +410,8 @@ export class Level {
       this.updateObstacles(dt);
       this.updatePickups(dt);
       this.updateProjectiles(dt);
+      this.updateAcid(dt);
+      this._prevAng = this.car.ang;
     }
     this.humans.commit();
     this.fx.update(dt);
@@ -462,8 +488,8 @@ export class Level {
     this.lights.sun.castShadow = this.o.quality.shadows;
     this.world.startBase.garageOpen = 0;
     this.snapCamera = true;
-    this.cockpit.group.visible = false;
-    engineStart();
+    this.cockpit.visible = false;
+    this.engineOn = false;
     sfx.gate();
   }
 
@@ -474,21 +500,29 @@ export class Level {
     this.introT += dt;
     const t = this.introT;
     const b = this.world.startBase;
-    b.garageOpen = smoothstep(0.2, 1.6, t);
-    b.open = smoothstep(1.2, 3.0, t);
-    if (t > 1.3) c.v = Math.min(c.v + dt * 5, 11);
+    // ворота гаража поднимаются, внутри горит свет; затем мотор, выезд и ворота базы
+    b.garageOpen = smoothstep(0.3, 2.2, t);
+    b.open = smoothstep(2.6, 4.4, t);
+    if (t > 1.0 && !this.engineOn) {
+      this.engineOn = true;
+      engineStart();
+    }
+    if (t > 2.4) c.v = Math.min(c.v + dt * 4.5, 11);
     c.s += c.v * dt;
     this.carModel.update(dt, c.v, 0);
     this.updateCarTransform(dt);
-    engineSet(0.3 + c.v / 30, 0.6);
-    // камера: сначала у гаража, потом у ворот снаружи
+    engineSet(0.05 + c.v / 30, c.v > 0.5 ? 0.6 : 0.2);
     const cp = this.carModel.group.position;
-    if (t < 2.6) {
-      const p = this.wpos(-18, 6.5, 2.2, new THREE.Vector3());
-      this.setCam(p, _v2.copy(cp).add(new THREE.Vector3(0, 1, 0)), 50, t < 0.05);
+    if (t < 4.2) {
+      // план 1: у ворот гаража, камера медленно отъезжает
+      const k = smoothstep(0, 4.2, t);
+      const p = this.wpos(-24 + k * 3, 3.6 - k * 1.2, 1.7 + k * 0.4, new THREE.Vector3());
+      const look = this.wpos(-35 + k * 8, 0, 1.4, new THREE.Vector3());
+      this.setCam(p, look, 52, t < 0.05);
     } else {
+      // план 2: снаружи у ворот базы
       const p = this.wpos(16, -7.5, 1.6, new THREE.Vector3());
-      this.setCam(p, _v2.copy(cp).add(new THREE.Vector3(0, 1, 0)), 50, t < 2.62);
+      this.setCam(p, _v2.copy(cp).add(new THREE.Vector3(0, 1, 0)), 50, t < 4.22);
     }
     if (c.s > 14) {
       this.state = 'drive';
@@ -599,6 +633,8 @@ export class Level {
       if (ds < 0 || ds > 35) continue;
       if (Math.abs(o.x - c.x) < hw + o.hw + 1.2 && (!block || ds < block.s - c.s)) block = o;
     }
+    const bz = this.boss && !this.boss.dead && this.boss.s - c.s > 0 && this.boss.s - c.s < 30 ? this.boss : null;
+    if (bz && !block) block = { s: bz.s, x: bz.x, hw: 1.6 };
     if (block) want = block.x > 0 || (block.x === 0 && c.x < 0) ? block.x - block.hw - hw - 1.5 : block.x + block.hw + hw + 1.5;
     else {
       const pk = this.pickups.find((p) => p.alive && p.s - c.s > 8 && p.s - c.s < 40);
@@ -607,6 +643,7 @@ export class Level {
     want = clamp(want, -6, 6);
     this.input.steer = clamp((want - c.x) * 0.5, -1, 1);
     this.input.fire = true;
+    if (c.hp < c.maxHp * 0.35) this.useRepair();
   }
 
   updateCarTransform(dt) {
@@ -634,7 +671,7 @@ export class Level {
     const g = this.carModel.group;
     const c = this.car;
     const cockpitMode = this.camMode === 'cockpit';
-    this.cockpit.group.visible = cockpitMode;
+    this.cockpit.visible = cockpitMode;
     if (cockpitMode) {
       const eye = this.carModel.body.localToWorld(this.cockpit.eye.clone());
       const look = this.carModel.body.localToWorld(this.cockpit.eye.clone().add(new THREE.Vector3(-c.ang * 6, -0.9, 12)));
@@ -678,42 +715,69 @@ export class Level {
     const hw = spec.W / 2;
     const st = this.o.stats;
     // зомби и бандиты
+    let latched = 0;
+    for (const z of this.zombies) if (z.latch && !z.dead) latched++;
     for (const z of this.zombies) {
-      if (z.dead || z.station && this.state === 'foot') continue;
+      if (z.dead || z.latch || (z.station && this.state === 'foot')) continue;
       const ds = z.s - c.s;
       const dx = z.x - c.x;
-      const r = 0.35 * z.T.scale;
-      if (Math.abs(ds) > hl + r || Math.abs(dx) > hw + r) {
+      const r = 0.35 * z.sc;
+      if (Math.abs(ds) > hl + r || Math.abs(dx) > hw + r) continue;
+      const frontal = ds > hl - 0.7;
+      const ram = st.ram * (c.v / 18);
+      if (z.boss) {
+        // удар о босса: машину отбрасывает, босс получает часть урона
+        if (this.t - (z.hitT || -9) > 0.8) {
+          z.hitT = this.t;
+          this.hurtZombie(z, ram * 2, null, 'car');
+          this.damageCar((z.mode === 'charge' ? 1.4 : 0.5) * z.dmg * (1 - st.armor * 0.5));
+          sfx.crash();
+          this.fx.blood(this.entityPos(z, _v2), null, 2);
+          c.v = -4;
+          c.s -= 1.5;
+          c.bumpV += 6;
+          z.stun = 2;
+          z.mode = 'recover';
+          z.modeT = 2.2;
+        }
+        c.s = Math.min(c.s, z.s - hl - r - 0.1);
         continue;
       }
-      if (c.v > 5) {
-        const ram = st.ram * (c.v / 18);
-        const dir = { s: 1, x: dx >= 0 ? 0.5 : -0.5 };
-        if (ram * 3 >= z.hp || z.type !== 'brute') {
-          this.killZombie(z, { s: c.v * 0.9 + 4, x: dir.x * c.v * 0.4, y: 4 + c.v * 0.25 }, 'car');
+      if (z.T.crawl && c.v > 2) {
+        this.killZombie(z, { s: c.v * 0.3, x: 0, y: 1 }, 'car');
+        c.bumpV += 2;
+        continue;
+      }
+      if (frontal && c.v > 5) {
+        if (ram * 3 >= z.hp || (z.type !== 'brute' && z.type !== 'armored')) {
+          this.killZombie(z, { s: c.v * 0.9 + 4, x: (dx >= 0 ? 0.5 : -0.5) * c.v * 0.4, y: 4 + c.v * 0.25 }, 'car');
           this.damageCar(Math.max(0.5, z.T.mass * 3 * (1 - st.armor)), true);
           c.v *= 1 - 0.035 * z.T.mass;
           c.bumpV += 1.5 * z.T.mass;
           sfx.splat();
           if (st.spikes) this.fx.sparks(this.wpos(z.s, z.x, 0.5), 3);
         } else {
-          // громила выдержал удар
-          this.hurtZombie(z, ram * 3, null);
+          // крепкий зомби выдержал удар
+          this.hurtZombie(z, ram * 3, null, 'car');
           z.s += 2.5;
           z.stun = 1;
           c.v *= 0.55;
           this.damageCar(12 * (1 - st.armor));
           sfx.crash();
         }
-      } else {
-        // зомби вцепился в машину
-        z.state = 'attack';
-        c.grabT = 0.5;
-        if (z.atkT <= 0) {
-          z.atkT = 1;
-          this.damageCar(z.T.dmg * 0.6 * (1 - st.armor));
-          sfx.hit();
+      } else if (latched < 4 && z.type !== 'bandit' && z.type !== 'brute' && (c.v < 16 || z.T.speed > 3)) {
+        // зомби цепляется за машину сбоку и рвёт её
+        z.latch = { side: Math.sign(dx) || 1, off: clamp(ds, -hl * 0.6, hl * 0.6), grip: z.type === 'butcher' ? 999 : 1.6 };
+        latched++;
+        z.atkT = 0.6;
+        if (!this.warned.latch || this.t - this.warned.latch > 8) {
+          this.warned.latch = this.t;
+          this.notice('Зомби вцепился! Виляй рулём!', 2.2, 'bad');
         }
+        sfx.groan();
+      } else if (c.v > 5) {
+        this.killZombie(z, { s: c.v * 0.5, x: Math.sign(dx) * 4, y: 3 }, 'car');
+        sfx.splat();
       }
     }
     // препятствия
@@ -734,6 +798,7 @@ export class Level {
             this.fx.sparks(this.wpos(c.s + hl, c.x, 0.7), 10);
             c.v *= 0.3;
             c.bumpV += 3;
+            this.shakeOffAll(8);
           } else c.v = Math.min(c.v, 3);
           // выталкиваем назад и в сторону, чтобы машина соскальзывала с препятствия
           if (Math.abs(ds) > hl + o.hl - 0.8) {
@@ -868,17 +933,18 @@ export class Level {
         best = e;
       }
     };
-    for (const z of this.zombies) if (!z.dead) consider(z, z.s, z.x, z.type === 'bandit' && !preferFoot ? -6 : 0);
+    for (const z of this.zombies) if (!z.dead) consider(z, z.s, z.x, z.latch ? -25 : z.boss ? -8 : z.type === 'bandit' && !preferFoot ? -6 : 0);
     for (const t of this.turrets) if (!t.dead) consider(t, t.s, t.x, -4);
     for (const o of this.obstacles) if (o.alive && (o.kind === 'barrel' || o.kind === 'crate' || o.kind === 'mine')) consider(o, o.s, o.x, o.kind === 'barrel' ? 6 : 14);
     return best;
   }
 
   entityPos(e, out = new THREE.Vector3()) {
-    if (e.T) return this.wpos(e.s, e.x, 1.1 * e.T.scale + (e.y || 0), out);
+    if (e.T) return this.wpos(e.s, e.x, (e.T.crawl ? 0.35 : 1.1) * e.sc + (e.y || 0), out);
     if (e.w) return this.wpos(e.s, e.x, 1.5, out);
     return this.wpos(e.s, e.x, 0.5, out);
   }
+
 
   damageEntity(e, dmg, dir, src = 'gun') {
     if (e.T) {
@@ -1207,18 +1273,40 @@ export class Level {
 
   hurtZombie(z, dmg, dir, src = 'gun', knock = null) {
     if (z.dead) return;
+    // броня гасит пули, но не взрывы, огонь и таран
+    if (z.T.armor && (src === 'gun' || src === 'shock' || src === 'melee')) {
+      dmg *= 1 - z.T.armor;
+      if (Math.random() < 0.5) this.fx.sparks(this.entityPos(z, _v2).add(new THREE.Vector3(0, 0.5 * z.sc, 0)), 2);
+    }
     z.hp -= dmg;
     this.humans.hit(z.slot);
     const p = this.entityPos(z, new THREE.Vector3());
-    this.fx.blood(p, dir, src === 'explosion' ? 2 : 0.6, z.type === 'toxic');
+    this.fx.blood(p, dir, src === 'explosion' ? 2 : 0.6, !!z.T.toxic);
     if (z.hp <= 0) {
       const v = knock || (dir ? { s: 2, x: 0, y: 2 } : { s: 1, x: 0, y: 2 });
       this.killZombie(z, v, src);
     } else if (z.state === 'idle') z.state = 'chase';
   }
 
+  // Сбросить всех, кто вцепился в машину
+  shakeOffAll(force = 6) {
+    const c = this.car;
+    for (const z of this.zombies) {
+      if (!z.latch || z.dead) continue;
+      const side = z.latch.side;
+      z.latch = null;
+      if (c.v > 9) this.killZombie(z, { s: c.v * 0.4, x: side * force, y: 3 }, 'car');
+      else {
+        z.x = c.x + side * (this.carModel.spec.W / 2 + 1.2);
+        z.stun = 1.5;
+        this.hurtZombie(z, 20, null, 'car');
+      }
+    }
+  }
+
   killZombie(z, vel, src) {
     if (z.dead) return;
+    z.latch = null;
     z.dead = { vs: vel.s || 0, vx: vel.x || 0, vy: vel.y || 0, rx: 0, spin: (vel.s || 0) * 0.6 + 2, t: 0, lie: Math.random() < 0.5 ? -1 : 1 };
     z.hp = 0;
     if (z.type === 'bandit') {
@@ -1228,15 +1316,82 @@ export class Level {
       if (z.type === 'brute') this.stats.brutes++;
       if (this.player) this.stats.footKills++;
     }
-    this.stats.cash += z.type === 'brute' ? 20 : z.type === 'bandit' ? 25 : 5;
+    this.stats.cash += z.boss ? 0 : z.type === 'brute' || z.type === 'armored' ? 20 : z.type === 'bandit' ? 25 : 5;
     const p = this.entityPos(z, new THREE.Vector3());
-    this.fx.blood(p, null, src === 'car' ? 2.5 : 1.5, z.type === 'toxic');
-    if (z.type === 'toxic') {
+    this.fx.blood(p, null, src === 'car' ? 2.5 : 1.5, !!z.T.toxic);
+    if (z.T.toxic) {
       this.fx.emit({ pos: p, count: 16, spread: 2.5, up: 1, color: '#9aff3a', color2: '#3a6a10', life: [0.8, 1.6], size: [0.8, 1.6], grow: 1.5, alpha: 0.5 });
       if (this.player && Math.hypot(this.player.s - z.s, this.player.x - z.x) < 3) this.poisonPlayer(6);
     }
+    if (z.T.explode && !z.exploded) {
+      z.exploded = true;
+      this.explode(z.s, z.x, 4.5, 55 * this.params.dmgMul, 'exploder');
+    }
+    if (z.boss) {
+      this.stats.bosses = (this.stats.bosses || 0) + 1;
+      this.bossKilled = true;
+      this.fx.explosion(p, 1.2);
+      this.fx.blood(p, null, 6, !!z.T.toxic);
+      sfx.explosion(1.2);
+      sfx.win();
+      this.notice(`${z.T.name} повержен!`, 3);
+      for (let i = 0; i < 8; i++) this.addPickup(z.s + this.rng.f(-3, 5), clamp(z.x + this.rng.f(-4, 4), -6, 6), this.rng.pick(['cash', 'cash', 'metal', 'repair', 'ammo', 'wood']));
+      if (this.boss === z) this.boss = null;
+    }
     if (src === 'car') sfx.splat();
     this.o.onEvent?.('kill', z);
+  }
+
+  // Кислотный плевок: летит по дуге и разбрызгивается
+  spit(z, count = 1) {
+    const c = this.car;
+    const pl = this.player;
+    for (let i = 0; i < count; i++) {
+      const from = this.entityPos(z, new THREE.Vector3()).add(new THREE.Vector3(0, 0.6 * z.sc, 0));
+      let ts;
+      let tx;
+      if (pl) {
+        ts = pl.s + this.rng.f(-1, 1) * (i ? 2 : 0.5);
+        tx = pl.x + this.rng.f(-1, 1) * (i ? 2 : 0.5);
+      } else {
+        const lead = Math.min(18, c.v * 0.9);
+        ts = c.s + lead + this.rng.f(-1.5, 1.5) + i * 2;
+        tx = c.x + this.rng.f(-1, 1) * (i ? 2 : 0.6);
+      }
+      const mesh = new THREE.Mesh(this.acidGeo ||= new THREE.IcosahedronGeometry(0.22, 1), this.acidMat ||= new THREE.MeshBasicMaterial({ color: 0x9aff3a }));
+      mesh.position.copy(from);
+      this.scene.add(mesh);
+      this.acid.push({ mesh, from, ts, tx, t: 0, T: 0.9, dmg: 6 * this.params.dmgMul });
+    }
+    sfx.splat();
+  }
+
+  updateAcid(dt) {
+    const c = this.car;
+    for (let i = this.acid.length - 1; i >= 0; i--) {
+      const a = this.acid[i];
+      a.t += dt / a.T;
+      const k = Math.min(1, a.t);
+      const to = this.wpos(a.ts, a.tx, 0.4, _v2);
+      a.mesh.position.copy(a.from).lerp(to, k);
+      a.mesh.position.y += Math.sin(k * Math.PI) * 3;
+      if (Math.random() < 0.5) this.fx.emit({ pos: a.mesh.position, count: 1, spread: 0.2, color: '#b8ff5a', color2: '#3a6a10', life: [0.2, 0.4], size: [0.15, 0.3] });
+      if (k >= 1) {
+        this.scene.remove(a.mesh);
+        this.acid.splice(i, 1);
+        this.fx.emit({ pos: to, count: 18, spread: 2.5, up: 2, color: '#b8ff5a', color2: '#2a5a10', life: [0.4, 0.9], size: [0.2, 0.5], gravity: 8 });
+        const pl = this.player;
+        if (pl) {
+          if (Math.hypot(pl.s - a.ts, pl.x - a.tx) < 1.8) {
+            this.hurtPlayer(a.dmg * 1.3);
+            this.poisonPlayer(6);
+          }
+        } else if (Math.abs(c.s - a.ts) < this.carModel.spec.L / 2 + 1 && Math.abs(c.x - a.tx) < this.carModel.spec.W / 2 + 1) {
+          this.damageCar(a.dmg * (1 - this.o.stats.armor * 0.4));
+          this.fx.smoke(to, false);
+        }
+      }
+    }
   }
 
   updateZombies(dt) {
@@ -1291,7 +1446,7 @@ export class Level {
         tr.toWorld(z.s, z.x, rig.root.position);
         rig.root.position.y += z.y + 0.25;
         rig.root.rotation.set(d.rx, z.yaw, 0, 'YXZ');
-        rig.root.scale.setScalar(T.scale);
+        rig.root.scale.setScalar(z.sc);
         rig.armL.rotation.set(-2.6, 0, 0.6);
         rig.armR.rotation.set(-2.4, 0, -0.5);
         rig.legL.rotation.set(-0.3, 0, 0.3);
@@ -1310,6 +1465,41 @@ export class Level {
       }
       z.atkT -= dt;
       z.stun = Math.max(0, z.stun - dt);
+      // вцепился в машину: держится сбоку и рвёт её, пока его не стряхнут
+      if (z.latch) {
+        const L2 = z.latch;
+        if (this.state !== 'drive' && this.state !== 'stationOut') {
+          z.latch = null;
+        } else {
+          const jerk = Math.abs(c.ang - (this._prevAng ?? c.ang)) / Math.max(dt, 1e-3);
+          L2.grip -= jerk * dt * 1.4;
+          z.s = c.s + L2.off;
+          z.x = c.x + L2.side * (this.carModel.spec.W / 2 + 0.3);
+          z.yaw = c.yaw + (L2.side > 0 ? -Math.PI / 2 : Math.PI / 2);
+          if (z.atkT <= 0) {
+            z.atkT = 1.1;
+            this.damageCar(z.dmg * 0.6 * (1 - this.o.stats.armor));
+            sfx.hit();
+            this.fx.sparks(this.entityPos(z, _v2), 2);
+          }
+          if (L2.grip <= 0) {
+            const side = L2.side;
+            z.latch = null;
+            if (c.v > 9) this.killZombie(z, { s: c.v * 0.3, x: side * 7, y: 3 }, 'car');
+            else z.stun = 1.2;
+            continue;
+          }
+          tr.toWorld(z.s, z.x, rig.root.position);
+          rig.root.position.y += 0.25;
+          rig.root.rotation.set(0, z.yaw, 0);
+          rig.root.scale.setScalar(z.sc);
+          poseRig(rig, this.t + z.phase, { phase: z.phase, moving: false, attack: true, zombieArms: true, lean: 0.35 });
+          rig.legL.rotation.x = -0.6;
+          rig.legR.rotation.x = 0.4;
+          humans.sync(z.slot, dt);
+          continue;
+        }
+      }
       const ds = tS - z.s;
       const dx = tX - z.x;
       const dist = Math.hypot(ds, dx);
@@ -1321,19 +1511,44 @@ export class Level {
       let aim = false;
       if (z.type === 'bandit') {
         // бандит: держит позицию и стреляет
-        if (dist < 75) {
+        if (dist < 62) {
           aim = true;
           dirS = ds;
           dirX = dx;
           z.shootT -= dt;
           if (z.shootT <= 0 && this.state !== 'arrive') {
             z.shootT = this.rng.f(1.0, 1.8);
-            this.enemyShot(z, 2.5 + this.dest * 0.5);
+            this.enemyShot(z, 1.8 + Math.max(0, this.dest - 2) * 0.45);
           }
         } else if (Math.random() < 0.01) z.wander = this.rng.f(0, 6.28);
       } else {
-        const aggro = T.speed > 3 ? 55 : 40;
+        const aggro = z.boss ? 120 : T.speed > 3 ? 60 : 45;
         if (z.state === 'idle' && dist < aggro) z.state = 'chase';
+        // плевуны и королева плюются кислотой
+        if (T.spit && dist < (z.boss ? 36 : 26) && dist > 4 && z.stun <= 0 && this.state !== 'arrive' && this.state !== 'stationIn') {
+          z.spitT -= dt;
+          if (z.spitT <= 0) {
+            z.spitT = z.boss ? 2.4 : this.rng.f(2.8, 3.8);
+            this.spit(z, z.boss ? 3 : 1);
+          }
+        }
+        // королева призывает бегунов
+        if (z.type === 'queen' && dist < 45) {
+          z.summonT -= dt;
+          if (z.summonT <= 0) {
+            z.summonT = 7;
+            for (let k = 0; k < 2; k++) {
+              const m = this.spawnZombie({ s: z.s + this.rng.f(-3, 3), x: z.x + this.rng.f(-3, 3), type: 'runner', station: z.station });
+              if (m) m.state = 'chase';
+            }
+            this.fx.emit({ pos: this.entityPos(z, _v2), count: 20, spread: 3, up: 2, color: '#9aff3a', color2: '#3a6a10', life: [0.6, 1.2], size: [0.5, 1], alpha: 0.6 });
+          }
+        }
+        // взрывной подрывается рядом с целью
+        if (T.explode && dist < (pl ? 2.2 : this.carModel.spec.W / 2 + 1.6)) {
+          this.killZombie(z, { s: 0, x: 0, y: 2 }, 'self');
+          continue;
+        }
         if (z.stun > 0) {
           moving = false;
         } else if (z.state === 'idle') {
@@ -1345,18 +1560,47 @@ export class Level {
         } else {
           dirS = ds;
           dirX = dx;
-          const reach = pl ? 1.0 : this.carModel.spec.W / 2 + 0.5;
-          if (dist > reach) {
-            spd = T.speed * (pl ? 1.0 : 1);
-            moving = true;
+          // впереди машины зомби выходят на её полосу, чтобы перехватить
+          if (!pl && ds < 0 && dist > 6) dirX = dx * 3;
+          const reach = pl ? 1.0 * z.sc : this.carModel.spec.W / 2 + 0.5;
+          spd = T.speed * z.spd;
+          // Танк разгоняется и таранит
+          if (z.type === 'tank') {
+            z.modeT -= dt;
+            if (z.mode === 'walk' && dist < 38 && z.modeT <= 0) {
+              z.mode = 'charge';
+              z.modeT = 2.2;
+              z.chargeDir = { s: ds / (dist || 1), x: dx / (dist || 1) };
+              sfx.groan();
+              this.notice('Танк несётся на тебя!', 1.5, 'bad');
+            } else if (z.mode === 'charge') {
+              spd = 9 * this.params.speedMul;
+              dirS = z.chargeDir.s;
+              dirX = z.chargeDir.x;
+              this.shake = Math.max(this.shake, 0.25);
+              if (z.modeT <= 0) {
+                z.mode = 'recover';
+                z.modeT = 1.6;
+              }
+            } else if (z.mode === 'recover') {
+              spd = 0;
+              if (z.modeT <= 0) {
+                z.mode = 'walk';
+                z.modeT = 2.5;
+              }
+            }
+          }
+          if (dist > reach || z.mode === 'charge') {
+            moving = spd > 0;
           } else {
             attack = true;
             if (pl && z.atkT <= 0) {
-              z.atkT = 1.1;
-              this.hurtPlayer(T.dmg);
+              z.atkT = z.boss ? 1.4 : 1.1;
+              this.hurtPlayer(z.dmg);
               if (T.toxic) this.poisonPlayer(8);
             }
           }
+          if (z.type === 'queen' && dist < 16) moving = false;
         }
         z.groanT -= dt;
         if (z.groanT <= 0) {
@@ -1394,18 +1638,41 @@ export class Level {
         }
         this.stationCollide(z, 0.35);
       }
+      // зомби обходят препятствия, а не проходят сквозь них
+      for (const o of this.obstacles) {
+        if (!o.alive || o.kind === 'mine' || o.kind === 'spikes') continue;
+        const ds2 = z.s - o.s;
+        const dx2 = z.x - o.x;
+        const hs = o.hl + 0.35;
+        const hx = o.hw + 0.35;
+        if (Math.abs(ds2) < hs && Math.abs(dx2) < hx) {
+          if (hx - Math.abs(dx2) < hs - Math.abs(ds2)) z.x = o.x + Math.sign(dx2 || 1) * hx;
+          else z.s = o.s + Math.sign(ds2 || 1) * hs;
+        }
+      }
       tr.toWorld(z.s, z.x, rig.root.position);
       rig.root.rotation.set(0, z.yaw, 0);
-      rig.root.scale.setScalar(T.scale);
+      rig.root.scale.setScalar(z.sc);
       poseRig(rig, this.t + z.phase, {
         phase: z.phase,
         moving,
         attack,
         aim,
         zombieArms: z.type !== 'bandit',
-        lean: z.type === 'bandit' ? 0.02 : 0.2,
+        lean: z.type === 'bandit' ? 0.02 : z.mode === 'charge' ? 0.6 : 0.2,
         headZ: z.type === 'bandit' ? 0 : Math.sin(z.phase * 0.3) * 0.2,
       });
+      if (T.crawl) {
+        // ползёт на руках, волоча ноги
+        rig.root.rotation.set(1.3, z.yaw, 0, 'YXZ');
+        rig.root.position.y += 0.22;
+        rig.torso.rotation.set(0, 0, Math.sin(z.phase) * 0.1);
+        rig.armL.rotation.set(-2.6 + Math.sin(z.phase) * 0.5, 0, 0.2);
+        rig.armR.rotation.set(-2.6 - Math.sin(z.phase) * 0.5, 0, -0.2);
+        rig.legL.rotation.set(0.15, 0, 0.1);
+        rig.legR.rotation.set(0.1, 0, -0.1);
+        rig.head.rotation.set(-0.6, 0, 0);
+      }
       humans.sync(z.slot, dt);
     }
   }
@@ -1414,7 +1681,7 @@ export class Level {
     const from = this.wpos(z.s, z.x, 1.4, new THREE.Vector3());
     const pl = this.player;
     const to = pl ? this.wpos(pl.s, pl.x, 1.1, new THREE.Vector3()) : this.carModel.group.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, 1 + Math.random(), (Math.random() - 0.5) * 3));
-    const hit = Math.random() < (pl ? 0.5 : 0.65);
+    const hit = Math.random() < (pl ? 0.45 : 0.5);
     if (!hit) to.add(new THREE.Vector3((Math.random() - 0.5) * 4, Math.random() * 2, (Math.random() - 0.5) * 4));
     this.fx.tracer(from, to, '#ff9a5a', 0.09);
     this.fx.muzzle(from, to.clone().sub(from).normalize(), 0.8);
@@ -1463,7 +1730,7 @@ export class Level {
           sfx.shot('bullet');
           if (hit) {
             if (pl) this.hurtPlayer(3);
-            else this.damageCar(1.5 * (1 - this.o.stats.armor * 0.5), true);
+            else this.damageCar((1 + Math.max(0, this.dest - 2) * 0.2) * (1 - this.o.stats.armor * 0.5), true);
           }
         }
       }
@@ -1540,28 +1807,51 @@ export class Level {
   exitCar() {
     const c = this.car;
     this.state = 'foot';
-    this.cockpit.group.visible = false;
+    this.cockpit.visible = false;
     engineSet(0.05, 0);
     const o = this.o;
-    const pm = new PlayerModel({ vest: o.vest, helmet: o.helmet, gunModel: o.gun.model, melee: o.gun.cat === 'melee' });
-    this.scene.add(pm.group);
+    // вид от первого лица: в руках — выбранное оружие
+    this.vm = new ViewModel(o.gun.model, o.gun.cat === 'melee');
+    this.camera.add(this.vm.group);
+    if (!this.camera.parent) this.scene.add(this.camera);
     const armor = o.armor || 0;
+    const ps = c.s;
+    const px = c.x - 1.9;
+    // сразу смотрим на ближайшую колонку
+    const pump = this.station.pumps.reduce((a, b2) => (Math.hypot(b2.s - ps, b2.x - px) < Math.hypot(a.s - ps, a.x - px) ? b2 : a));
+    this.track.frame(ps, _fr);
+    const wx = _fr.fx * (pump.s - ps) + _fr.rx * (pump.x - px);
+    const wz = _fr.fz * (pump.s - ps) + _fr.rz * (pump.x - px);
     this.player = {
-      s: c.s,
-      x: c.x - 1.9,
-      yaw: 0,
+      s: ps,
+      x: px,
+      yaw: Math.atan2(wx, wz),
+      pitch: -0.05,
       hp: 100,
       maxHp: 100,
       poison: 0,
-      model: pm,
       dmgMul: 1 - Math.min(0.7, armor / 140),
       hurtT: 0,
       target: null,
+      eye: new THREE.Vector3(),
     };
     this.pumpProgress = 0;
     this.wave = { left: this.params.stationWave, t: 2 };
-    this.camBlend = 0;
-    this.notice('Выйди и заправь машину!', 3);
+    this.world.canopy.material.opacity = 1;
+    this.world.canopy.material.depthWrite = true;
+    // маркер цели над колонкой / машиной
+    const mk = new THREE.Group();
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 12), new THREE.MeshBasicMaterial({ color: 0xffd21a }));
+    cone.rotation.x = Math.PI;
+    mk.add(cone);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.06, 6, 24).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd21a, transparent: true, opacity: 0.6 }));
+    ring.position.y = -2.3;
+    mk.add(ring);
+    this.marker = mk;
+    this.scene.add(mk);
+    this.camBlend = 1;
+    this.snapCamera = true;
+    this.notice('Дойди до колонки и заправь машину!', 3);
     this.o.onEvent?.('cutscene', false);
     this.o.onEvent?.('foot');
     sfx.gate();
@@ -1627,8 +1917,8 @@ export class Level {
             s = S + this.rng.f(-35, 35);
             x = 12;
           }
-          const r = this.rng.next();
-          const type = r < this.params.bruteShare ? 'brute' : r < this.params.bruteShare + this.params.runnerShare + 0.15 ? 'runner' : r < 0.9 - this.params.toxicShare ? 'walker' : this.params.toxicShare > 0 ? 'toxic' : 'walker';
+          const t0 = pickZombieType(this.params.mix, this.rng.next());
+          const type = t0 === 'crawler' ? 'runner' : t0;
           const z = this.spawnZombie({ s, x, type, station: true });
           if (z) {
             z.state = 'chase';
@@ -1637,67 +1927,123 @@ export class Level {
         }
       }
     }
-    // движение
+    if (w.left <= 0 && this.params.stationBoss && !this.stationBoss) {
+      this.stationBoss = this.spawnZombie({ s: S + 40, x: -30, type: 'butcher', station: true });
+      if (this.stationBoss) {
+        this.boss = this.stationBoss;
+        this.notice('Босс: Мясник!', 3, 'bad');
+        sfx.alarm();
+      }
+    }
+    // обзор: мышь / палец / стрелки
+    const sens = this.o.settings.sens || 1;
+    p.yaw -= (inp.lookX || 0) * 0.0026 * sens + (inp.turn || 0) * 2.2 * dt;
+    p.pitch = clamp(p.pitch - (inp.lookY || 0) * 0.0026 * sens, -0.95, 0.9);
+    // движение относительно взгляда
     const mx = clamp(inp.moveX, -1, 1);
     const my = clamp(inp.moveY, -1, 1);
-    const ml = Math.hypot(mx, my);
-    const speed = 5.2;
-    if (ml > 0.1) {
-      p.s += (my / Math.max(1, ml)) * speed * dt;
-      p.x += (mx / Math.max(1, ml)) * speed * dt;
+    const ml = Math.min(1, Math.hypot(mx, my));
+    const speed = 5.0;
+    if (ml > 0.08) {
+      const fx = Math.sin(p.yaw);
+      const fz = Math.cos(p.yaw);
+      const rx = -fz;
+      const rz = fx;
+      const k = speed * dt / Math.max(1, Math.hypot(mx, my));
+      const wx = (fx * my + rx * mx) * k;
+      const wz = (fz * my + rz * mx) * k;
+      this.track.frame(p.s, _fr);
+      p.s += wx * _fr.fx + wz * _fr.fz;
+      p.x += wx * _fr.rx + wz * _fr.rz;
     }
     p.s = clamp(p.s, S - 44, S + 44);
     p.x = clamp(p.x, -44, 8);
     this.stationCollide(p, 0.4);
-    // цель и стрельба
+    // камера на уровне глаз
+    const vm = this.vm;
+    const bob = ml > 0.08 ? Math.abs(Math.sin(vm.bob)) * 0.05 : 0;
+    this.wpos(p.s, p.x, 1.62 + bob, p.eye);
+    const cam = this.camera;
+    cam.position.copy(p.eye);
+    cam.rotation.set(p.pitch, p.yaw + Math.PI, 0, 'YXZ');
+    if (this.shake > 0 && this.o.settings.shake !== false) {
+      cam.rotation.x += (Math.random() - 0.5) * this.shake * 0.03;
+      cam.rotation.y += (Math.random() - 0.5) * this.shake * 0.03;
+    }
+    const fov = 70;
+    if (Math.abs(cam.fov - fov) > 0.1) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+    cam.updateMatrixWorld();
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+    // что под прицелом и лёгкий доводчик
     const melee = g.cat === 'melee';
-    const range = melee ? g.range + 0.6 : g.range;
-    const tgt = this.findTarget(p.s, p.x, range, 0, Math.PI, true);
-    p.target = tgt && !tgt.dead && tgt.alive !== false ? tgt : null;
-    let faceYaw = null;
-    this.track.frame(p.s, _fr);
-    if (p.target) {
-      const ds = p.target.s - p.s;
-      const dx = p.target.x - p.x;
-      faceYaw = Math.atan2(_fr.fx * ds + _fr.rx * dx, _fr.fz * ds + _fr.rz * dx);
-    } else if (ml > 0.1) faceYaw = Math.atan2(_fr.fx * my + _fr.rx * mx, _fr.fz * my + _fr.rz * mx);
-    if (faceYaw !== null) p.yaw += angleDiff(p.yaw, faceYaw) * Math.min(1, dt * 12);
+    const range = melee ? g.range + 0.8 : g.range;
+    let inSight = null;
+    let assist = null;
+    let assistOff = Infinity;
+    const aimPos = new THREE.Vector3();
+    for (const z of this.zombies) {
+      if (z.dead) continue;
+      this.entityPos(z, aimPos);
+      if (!z.T.crawl) aimPos.y += 0.15 * z.sc;
+      const to = aimPos.clone().sub(p.eye);
+      const dist = to.length();
+      if (dist > range + 1) continue;
+      to.divideScalar(dist);
+      const off = Math.acos(clamp(fwd.dot(to), -1, 1));
+      const size = Math.atan((0.42 * z.sc) / dist) + (melee ? 0.5 : 0.02);
+      if (off < size && (!inSight || dist < inSight.dist)) inSight = { z, dist, pos: aimPos.clone() };
+      if (off < 0.13 && off < assistOff) {
+        assistOff = off;
+        assist = { z, to: to.clone() };
+      }
+    }
+    if (assist && !melee) {
+      // доводка: плавно и слабо, почти незаметно
+      const want = Math.atan2(assist.to.x, assist.to.z);
+      const wantPitch = Math.asin(clamp(assist.to.y, -1, 1));
+      const k = Math.min(1, dt * 2.2) * (1 - assistOff / 0.13) * 0.55;
+      p.yaw += angleDiff(p.yaw, want) * k;
+      p.pitch += (wantPitch - p.pitch) * k;
+    }
+    p.target = inSight ? inSight.z : null;
+    // стрельба: сама, когда зомби в прицеле
     const gs = this.gun;
     gs.cd -= dt;
     if (gs.reload > 0) {
       gs.reload -= dt;
       if (gs.reload <= 0) gs.mag = g.mag;
     }
-    const wantFire = inp.fire || p.target;
+    const wantFire = inp.fire || !!inSight;
     if (wantFire && gs.cd <= 0 && gs.reload <= 0) {
       if (melee) {
-        if (p.target && Math.hypot(p.target.s - p.s, p.target.x - p.x) < range) {
-          gs.cd = 60 / g.rpm;
-          p.model.swing = 1;
-          sfx.shot('melee');
-          for (const z of this.zombies) {
-            if (z.dead) continue;
-            if (Math.hypot(z.s - p.s, z.x - p.x) < range) {
-              const dirS = z.s - p.s;
-              const dirX = z.x - p.x;
-              const l = Math.hypot(dirS, dirX) || 1;
-              this.hurtZombie(z, g.dmg, null, 'melee', { s: (dirS / l) * 4, x: (dirX / l) * 4, y: 3 });
-            }
+        gs.cd = 60 / g.rpm;
+        vm.kick();
+        sfx.shot('melee');
+        for (const z of this.zombies) {
+          if (z.dead) continue;
+          const to = this.entityPos(z, aimPos).sub(p.eye);
+          const d = to.length();
+          if (d < range && fwd.dot(to.normalize()) > 0.55) {
+            this.hurtZombie(z, g.dmg, null, 'melee', { s: (z.s - p.s) / (d || 1) * 4, x: (z.x - p.x) / (d || 1) * 4, y: 3 });
           }
         }
       } else if (gs.mag > 0) {
         gs.cd = 60 / g.rpm;
         gs.mag--;
-        const muzzle = p.model.muzzle.getWorldPosition(new THREE.Vector3());
-        const fwd = new THREE.Vector3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
-        const tpos = p.target ? this.entityPos(p.target, new THREE.Vector3()) : muzzle.clone().addScaledVector(fwd, 20);
-        this.firePersonal(g, muzzle, tpos, p.target, fwd);
+        vm.kick(g.cat === 'shotgun' || g.cat === 'sniper' || g.cat === 'rocket' ? 1.4 : 0.6);
+        const muzzle = vm.muzzle.getWorldPosition(new THREE.Vector3());
+        const tpos = inSight ? inSight.pos : p.eye.clone().addScaledVector(fwd, g.range);
+        this.firePersonal(g, muzzle, tpos, inSight ? inSight.z : null, fwd);
         if (gs.mag <= 0) {
           gs.reload = 1.5;
           sfx.reload();
         }
       }
     }
+    vm.update(dt, ml > 0.08, speed * ml, gs.reload > 0);
     // заправка
     let nearPump = false;
     for (const pp of this.station.pumps) if (Math.hypot(pp.s - p.s, pp.x - p.x) < 2.6) nearPump = true;
@@ -1705,9 +2051,8 @@ export class Level {
     if (this.pumpProgress < 1) {
       if (nearPump) {
         this.pumpProgress = Math.min(1, this.pumpProgress + dt / 8);
-        this.car.fuel = lerp(this.car.fuel, this.car.maxFuel, dt / 8 * 1.5);
+        this.car.fuel = lerp(this.car.fuel, this.car.maxFuel, (dt / 8) * 1.5);
         if (Math.random() < dt * 4) sfx.fuel();
-        if (Math.random() < 0.3) this.fx.emit({ pos: this.wpos(p.s, p.x, 1.2), count: 1, spread: 0.3, up: 0.5, color: '#c8c0a0', color2: '#8a8470', life: [0.3, 0.6], size: [0.2, 0.4], alpha: 0.3 });
         if (this.pumpProgress >= 1) {
           this.car.fuel = this.car.maxFuel;
           this.stats.refueled = true;
@@ -1717,27 +2062,21 @@ export class Level {
       }
     }
     this.canEnter = this.pumpProgress >= 1 && Math.hypot(p.s - this.car.s, p.x - this.car.x) < 3.6;
+    // маркер: над ближайшей колонкой, потом над машиной
+    let goal;
+    if (this.pumpProgress < 1) goal = this.station.pumps.reduce((a, b2) => (Math.hypot(b2.s - p.s, b2.x - p.x) < Math.hypot(a.s - p.s, a.x - p.x) ? b2 : a));
+    else goal = { s: this.car.s, x: this.car.x };
+    this.goalDist = Math.hypot(goal.s - p.s, goal.x - p.x);
+    this.wpos(goal.s, goal.x, 3.2 + Math.sin(this.t * 3) * 0.2, this.marker.position);
+    this.marker.rotation.y += dt * 2;
+    this.marker.visible = !(this.pumpProgress < 1 && nearPump);
     // яд
     if (p.poison > 0) {
       p.poison -= dt;
       this.hurtPlayer(2.2 * dt, true);
     }
     p.hurtT = Math.max(0, p.hurtT - dt);
-    // модель
-    const m = p.model;
-    this.wpos(p.s, p.x, 0, m.group.position);
-    m.group.rotation.y = p.yaw;
-    m.pose(dt, ml > 0.1, speed * Math.min(1, ml), !!p.target, this.t);
-    // навес заправки становится прозрачным, чтобы было видно игрока
-    const cm = this.world.canopy.material;
-    const under = Math.abs(p.s - this.station.s) < 16 && p.x < -6 && p.x > -26;
-    cm.opacity = damp(cm.opacity, under ? 0.18 : 1, 6, dt);
-    cm.depthWrite = cm.opacity > 0.95;
-    // камера
-    const cam = this.wpos(p.s - 8.5, p.x + 2.5, 10.5, new THREE.Vector3());
-    const look = this.wpos(p.s + 1.5, p.x, 0.8, new THREE.Vector3());
-    this.setCam(cam, look, 55);
-    followSun(this.lights, m.group.position);
+    followSun(this.lights, p.eye);
     if (p.hp <= 0) this.fail('player');
   }
 
@@ -1780,7 +2119,9 @@ export class Level {
 
   enterCar() {
     if (!this.canEnter || this.state !== 'foot') return;
-    this.scene.remove(this.player.model.group);
+    this.camera.remove(this.vm.group);
+    this.scene.remove(this.marker);
+    this.vm = null;
     this.playerResult = { hp: this.player.hp };
     this.player = null;
     this.stationDone = true;
@@ -1820,7 +2161,7 @@ export class Level {
   startArrive() {
     this.state = 'arrive';
     this.arr = { t: 0, s0: this.car.s, x0: this.car.x, v0: Math.max(this.car.v, 8) };
-    this.cockpit.group.visible = false;
+    this.cockpit.visible = false;
     this.snapCamera = true;
     this.o.onEvent?.('cutscene', true);
     sfx.gate();
@@ -1880,14 +2221,21 @@ export class Level {
 
   updateDeadCam(dt) {
     this.deadT += dt;
-    const target = this.player ? this.player.model.group.position : this.carModel.group.position;
+    if (this.player) {
+      // игрок падает на землю
+      const p = this.player;
+      const cam = this.camera;
+      const k = Math.min(1, this.deadT * 1.5);
+      this.wpos(p.s, p.x, 1.62 - k * 1.35, cam.position);
+      cam.rotation.set(p.pitch * (1 - k) + k * 0.2, p.yaw + Math.PI, k * 1.2, 'YXZ');
+      if (this.vm) this.vm.group.visible = false;
+      return;
+    }
+    const target = this.carModel.group.position;
     const a = this.deadT * 0.3;
     const pos = target.clone().add(new THREE.Vector3(Math.sin(a) * 9, 5, Math.cos(a) * 9));
     this.setCam(pos, target.clone().add(new THREE.Vector3(0, 1, 0)), 55);
-    if (!this.player && Math.random() < 0.6) this.fx.smoke(this.carModel.group.localToWorld(this.carModel.hoodPoint.clone()), true);
-    if (this.player) {
-      this.player.model.group.rotation.x = damp(this.player.model.group.rotation.x, -Math.PI / 2, 4, dt);
-    }
+    if (Math.random() < 0.6) this.fx.smoke(this.carModel.group.localToWorld(this.carModel.hoodPoint.clone()), true);
   }
 
   revive() {
@@ -1896,7 +2244,7 @@ export class Level {
     if (this.prevState === 'foot' && this.player) {
       this.player.hp = this.player.maxHp * 0.7;
       this.player.poison = 0;
-      this.player.model.group.rotation.x = 0;
+      if (this.vm) this.vm.group.visible = true;
       this.state = 'foot';
     } else {
       c.hp = Math.max(c.hp, c.maxHp * 0.6);
@@ -1976,8 +2324,8 @@ export class Level {
     const w = this.wpn;
     let objective = `Доберись до базы ${this.dest}`;
     if (this.state === 'foot') {
-      if (this.pumpProgress < 1) objective = this.nearPump ? `Заправка: ${Math.round(this.pumpProgress * 100)}%` : 'Подойди к колонке';
-      else objective = 'Вернись в машину';
+      if (this.pumpProgress < 1) objective = this.nearPump ? `Заправка: ${Math.round(this.pumpProgress * 100)}%` : `Подойди к колонке · ${Math.round(this.goalDist || 0)} м`;
+      else objective = `Вернись в машину · ${Math.round(this.goalDist || 0)} м`;
     }
     return {
       state: this.state,
@@ -2010,7 +2358,9 @@ export class Level {
       trunk: this.o.stats.trunk,
       camMode: this.camMode,
       hurt: p ? p.hurtT : 0,
+      aimed: p ? !!p.target : false,
       autoWeapon: !!w.def.auto,
+      boss: this.boss && !this.boss.dead && Math.abs(this.boss.s - (p ? p.s : c.s)) < 110 ? { name: this.boss.T.name, hp: this.boss.hp, max: this.boss.maxHp } : null,
     };
   }
 
@@ -2031,13 +2381,23 @@ export class Level {
     ctx.fillRect(0, 0, size, size);
     // система координат: машина в центре, дорога вверх
     const f0 = tr.frame(cs, {});
-    const toMap = (s, x) => {
+    const rot = p ? angleDiff(f0.yaw, p.yaw) : 0;
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const toMap0 = (s, x) => {
       const f = tr.frame(s, _fr);
       const wx = f.x + f.rx * x - (f0.x + f0.rx * cx);
       const wz = f.z + f.rz * x - (f0.z + f0.rz * cx);
       const u = wx * f0.rx + wz * f0.rz;
       const v = wx * f0.fx + wz * f0.fz;
-      return [r + u * scale, r - v * scale];
+      return [u, v];
+    };
+    // поворот карты по направлению взгляда
+    const toMap = (s, x) => {
+      const [u, v] = toMap0(s, x);
+      const u2 = u * cr + v * sr;
+      const v2 = -u * sr + v * cr;
+      return [r + u2 * scale, r - v2 * scale];
     };
     ctx.strokeStyle = 'rgba(160,160,150,0.9)';
     ctx.lineWidth = ROAD_HALF * 2 * scale;
@@ -2085,7 +2445,7 @@ export class Level {
     return {
       dest: this.dest,
       collected: { wood: st.wood, metal: st.metal, cloth: st.cloth, ammo: st.ammo },
-      cash: st.cash + this.params.reward + bonus,
+      cash: st.cash + this.params.reward + bonus + (this.bossKilled ? this.params.bossReward.cash : 0),
       baseReward: this.params.reward,
       bonus,
       picked: st.cash,
@@ -2099,7 +2459,10 @@ export class Level {
       refueled: st.refueled,
       carHpFrac: this.car.hp / this.car.maxHp,
       used: { repair: this.usedRepair || 0, fuel: this.usedFuel || 0, meds: this.usedMeds || {} },
-      xp: 40 + st.kills * 2 + st.bandits * 4,
+      xp: 40 + st.kills * 2 + st.bandits * 4 + (st.bosses || 0) * 50,
+      bosses: st.bosses || 0,
+      bossCash: this.bossKilled ? this.params.bossReward.cash : 0,
+      bossGold: this.bossKilled ? this.params.bossReward.gold : 0,
     };
   }
 
